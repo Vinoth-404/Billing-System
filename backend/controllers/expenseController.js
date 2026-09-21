@@ -1,13 +1,9 @@
 const db = require("../config/db");
 
 // Helper to execute query with promise
-const query = (sql, params = []) => {
-  return new Promise((resolve, reject) => {
-    db.query(sql, params, (err, results) => {
-      if (err) reject(err);
-      else resolve(results);
-    });
-  });
+const query = async (sql, params = []) => {
+  const [results] = await db.query(sql, params);
+  return results;
 };
 
 // Get all expenses with filtering and search

@@ -10,11 +10,13 @@ import {
   MessageSquare,
   ChevronDown,
   LogOut,
-  Settings as SettingsIcon
+  UserRound,
+  Settings as SettingsIcon,
+  Menu
 } from "lucide-react";
 import axios from "axios";
 
-function Header({ onLogout }) {
+function Header({ onLogout, onMenuClick }) {
   const [currentTime, setCurrentTime] = useState(new Date());
   const [notifications, setNotifications] = useState([]);
   const [showNotifications, setShowNotifications] = useState(false);
@@ -32,8 +34,9 @@ function Header({ onLogout }) {
 
   // Fetch stored notifications from DB API
   const fetchNotifications = () => {
+    const API = import.meta.env.VITE_API_URL || "http://localhost:5000";
     axios
-      .get("http://localhost:5000/api/notifications")
+      .get(`${API}/api/notifications`)
       .then((res) => {
         if (res.data) {
           setNotifications(res.data);
@@ -93,8 +96,19 @@ function Header({ onLogout }) {
 
   return (
     <header className="sticky top-0 z-30 flex h-16 w-full items-center justify-between border-b border-brand-border bg-white/90 px-8 backdrop-blur-md">
-      {/* Spacer */}
-      <div></div>
+      {/* Mobile Menu Toggle Button */}
+      <div className="flex items-center gap-3 lg:hidden">
+        <button
+          onClick={onMenuClick}
+          className="flex h-10 w-10 items-center justify-center rounded-xl border border-brand-border bg-white text-brand-text shadow-sm hover:bg-brand-light transition-colors"
+          title="Open Menu"
+        >
+          <Menu className="h-5 w-5" />
+        </button>
+      </div>
+
+      {/* Desktop spacer */}
+      <div className="hidden lg:block"></div>
 
       {/* Clock, Notifications & User */}
       <div className="flex items-center gap-6">
@@ -112,7 +126,7 @@ function Header({ onLogout }) {
             onClick={() => setShowNotifications(!showNotifications)}
             className="relative flex h-10 w-10 items-center justify-center rounded-xl border border-brand-border bg-white text-brand-text shadow-sm transition-all hover:bg-brand-light hover:text-brand-accent hover:border-brand-primary/30"
           >
-            <Bell className="h-5 w-5" />
+            <Bell className="h-5 w-5" strokeWidth={2} />
             {activeAlertsCount > 0 && (
               <span className="absolute -top-1 -right-1 flex h-5 w-5 items-center justify-center rounded-full bg-brand-danger text-[10px] font-bold text-white ring-2 ring-white animate-pulse">
                 {activeAlertsCount}
@@ -195,8 +209,8 @@ function Header({ onLogout }) {
             onClick={() => setShowProfileMenu(!showProfileMenu)}
             className="flex items-center gap-3 border-l border-brand-border pl-6 hover:opacity-80 transition-all outline-none"
           >
-            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-brand-primary/10 text-brand-accent font-semibold shadow-inner">
-              AD
+            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-brand-primary/10 text-brand-accent shadow-inner">
+              <UserRound className="h-5 w-5" strokeWidth={2} style={{ color: "#2563EB" }} />
             </div>
             <div className="hidden text-left md:block">
               <div className="flex items-center gap-1 font-semibold text-brand-text">
@@ -214,7 +228,7 @@ function Header({ onLogout }) {
                 onClick={() => setShowProfileMenu(false)}
                 className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold text-brand-subtext hover:bg-brand-light hover:text-brand-accent transition-all w-full text-left"
               >
-                <SettingsIcon className="h-4 w-4 text-brand-accent" />
+                <SettingsIcon className="h-4 w-4 text-brand-accent" strokeWidth={2} />
                 <span>Settings</span>
               </Link>
               <button
@@ -228,7 +242,7 @@ function Header({ onLogout }) {
                 }}
                 className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold text-brand-danger hover:bg-red-50 transition-all w-full text-left"
               >
-                <LogOut className="h-4 w-4" />
+                <LogOut className="h-4 w-4" strokeWidth={2} />
                 <span>Logout</span>
               </button>
             </div>

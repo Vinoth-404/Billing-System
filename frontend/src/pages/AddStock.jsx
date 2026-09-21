@@ -5,6 +5,7 @@ const API = import.meta.env.VITE_API_URL;
 function AddStock() {
   const initialFormState = {
     serial_no: "",
+    article_number: "",
     brand: "",
     type: "",
     size: "",
@@ -14,6 +15,7 @@ function AddStock() {
     discount_percent: "0",
     stock: "",
     supplier_name: "",
+    purchase_ref_no: "",
   };
 
   const [formData, setFormData] = useState(initialFormState);
@@ -78,6 +80,7 @@ function AddStock() {
                 selling_price: res.data.selling_price,
                 discount_percent: res.data.discount_percent || "0",
                 supplier_name: res.data.supplier_name || "",
+                article_number: res.data.article_number || prev.article_number || "",
                 stock: ""
               }));
               setIsExisting(true);
@@ -135,13 +138,19 @@ function AddStock() {
   const handleSubmit = (e) => {
     e.preventDefault();
     
+    // Verify payload contains article_number before sending
+    const payload = {
+      ...formData,
+      article_number: formData.article_number ? formData.article_number.trim() : ""
+    };
+
     // Validations
-    if (!formData.brand || !formData.type || !formData.size || !formData.color || !formData.purchase_price || !formData.selling_price || !formData.stock) {
+    if (!payload.article_number || !payload.brand || !payload.type || !payload.size || !payload.color || !payload.purchase_price || !payload.selling_price || !payload.stock || !payload.supplier_name) {
       setAlert({ type: "danger", message: "Please fill in all required fields." });
       return;
     }
 
-    if (parseFloat(formData.purchase_price) < 0 || parseFloat(formData.selling_price) < 0 || parseInt(formData.stock) <= 0) {
+    if (parseFloat(payload.purchase_price) < 0 || parseFloat(payload.selling_price) < 0 || parseInt(payload.stock) <= 0) {
       setAlert({ type: "danger", message: "Price and quantity values must be positive numbers." });
       return;
     }
@@ -150,7 +159,7 @@ function AddStock() {
     setAlert({ type: "", message: "" });
 
     axios
-      .post(`${API}/api/products`, formData)
+      .post(`${API}/api/products`, payload)
       .then((res) => {
         const actionText = isExisting ? "topped up" : "added";
         const purchaseVal = parseFloat(formData.purchase_price) || 0;
@@ -180,12 +189,13 @@ function AddStock() {
       });
   };
 
-  // Open inline modal for adding Brand/Type/Size/Color
+  // Open inline modal for adding Brand/Type/Size/Color/Supplier
   const handleAddNewClick = (category) => {
     let label = "Brand";
     if (category === "types") label = "Product Type";
     if (category === "sizes") label = "Size";
     if (category === "colors") label = "Color";
+    if (category === "suppliers") label = "Supplier";
 
     setInlineModal({
       isOpen: true,
@@ -216,6 +226,7 @@ function AddStock() {
         if (inlineModal.category === "types") fieldName = "type";
         if (inlineModal.category === "sizes") fieldName = "size";
         if (inlineModal.category === "colors") fieldName = "color";
+        if (inlineModal.category === "suppliers") fieldName = "supplier_name";
 
         fetchFilterOptions(fieldName, res.data.name);
 
@@ -241,17 +252,17 @@ function AddStock() {
     <div className="space-y-8 animate-slide-up">
       {/* Page Header */}
       <div>
-        <h1 className="text-2xl font-extrabold tracking-tight text-brand-text md:text-3xl">Add Slipper Stock</h1>
-        <p className="text-sm font-semibold text-brand-subtext mt-1">Register new slipper product lines or top up existing quantities</p>
+        <h1 className="text-[44px] font-bold tracking-tight text-brand-text leading-tight">Add Slipper Stock</h1>
+        <p className="text-[18px] font-medium text-brand-subtext mt-1">Register new slipper product lines or top up existing quantities</p>
       </div>
 
       {/* Main Form Content */}
       <div className="max-w-4xl">
-        <form onSubmit={handleSubmit} className="glass-card rounded-2xl p-6 shadow-premium space-y-6 bg-white border border-slate-100">
+        <form onSubmit={handleSubmit} className="glass-card rounded-2xl p-7 shadow-premium space-y-6 bg-white border border-slate-100">
           
           {/* Status alerts */}
           {alert.message && (
-            <div className={`rounded-xl p-4 text-xs font-bold border ${
+            <div className={`rounded-xl p-4 text-[15px] font-bold border ${
               alert.type === "success" 
                 ? "bg-emerald-50 text-emerald-700 border-emerald-200" 
                 : "bg-red-50 text-brand-danger border-red-200"
@@ -260,17 +271,33 @@ function AddStock() {
             </div>
           )}
 
+          {/* Article Number Field */}
+          <div>
+            <label className="block text-[15px] font-bold uppercase tracking-wider text-brand-subtext mb-2">
+              Article Number <span className="text-brand-danger">*</span>
+            </label>
+            <input
+              type="text"
+              name="article_number"
+              value={formData.article_number}
+              onChange={handleInputChange}
+              placeholder="e.g. ART1001 or BATA-1001"
+              className="h-12 w-full rounded-xl border border-brand-border bg-white px-4 text-[16px] placeholder:text-[15px] font-medium outline-none focus:border-brand-primary/60 focus:ring-2 focus:ring-brand-primary/10 disabled:bg-slate-50 disabled:text-slate-500 font-bold uppercase"
+              required
+            />
+          </div>
+
           {/* Product Specifications Row */}
           <div className="grid gap-5 md:grid-cols-2">
             <div>
               <div className="flex items-center justify-between mb-2">
-                <label className="block text-xs font-bold uppercase tracking-wider text-brand-subtext">
+                <label className="block text-[15px] font-bold uppercase tracking-wider text-brand-subtext">
                   Brand <span className="text-brand-danger">*</span>
                 </label>
                 <button
                   type="button"
                   onClick={() => handleAddNewClick("brands")}
-                  className="text-[10px] font-bold text-brand-accent hover:text-blue-600 transition-colors uppercase tracking-wider"
+                  className="text-[14px] font-bold text-brand-accent hover:text-blue-600 transition-colors uppercase tracking-wider"
                 >
                   + Add New Brand
                 </button>
@@ -279,7 +306,7 @@ function AddStock() {
                 name="brand"
                 value={formData.brand}
                 onChange={handleInputChange}
-                className="h-11 w-full rounded-xl border border-brand-border bg-white px-4 text-sm font-semibold outline-none focus:border-brand-primary/60 focus:ring-2 focus:ring-brand-primary/10"
+                className="h-12 w-full rounded-xl border border-brand-border bg-white px-4 text-[16px] font-medium outline-none focus:border-brand-primary/60 focus:ring-2 focus:ring-brand-primary/10"
                 required
               >
                 <option value="">Select Brand</option>
@@ -291,13 +318,13 @@ function AddStock() {
 
             <div>
               <div className="flex items-center justify-between mb-2">
-                <label className="block text-xs font-bold uppercase tracking-wider text-brand-subtext">
+                <label className="block text-[15px] font-bold uppercase tracking-wider text-brand-subtext">
                   Product Type <span className="text-brand-danger">*</span>
                 </label>
                 <button
                   type="button"
                   onClick={() => handleAddNewClick("types")}
-                  className="text-[10px] font-bold text-brand-accent hover:text-blue-600 transition-colors uppercase tracking-wider"
+                  className="text-[14px] font-bold text-brand-accent hover:text-blue-600 transition-colors uppercase tracking-wider"
                 >
                   + Add New Type
                 </button>
@@ -306,7 +333,7 @@ function AddStock() {
                 name="type"
                 value={formData.type}
                 onChange={handleInputChange}
-                className="h-11 w-full rounded-xl border border-brand-border bg-white px-4 text-sm font-semibold outline-none focus:border-brand-primary/60 focus:ring-2 focus:ring-brand-primary/10"
+                className="h-12 w-full rounded-xl border border-brand-border bg-white px-4 text-[16px] font-medium outline-none focus:border-brand-primary/60 focus:ring-2 focus:ring-brand-primary/10"
                 required
               >
                 <option value="">Select Type</option>
@@ -321,13 +348,13 @@ function AddStock() {
           <div className="grid gap-5 md:grid-cols-2">
             <div>
               <div className="flex items-center justify-between mb-2">
-                <label className="block text-xs font-bold uppercase tracking-wider text-brand-subtext">
+                <label className="block text-[15px] font-bold uppercase tracking-wider text-brand-subtext">
                   Size (UK/US) <span className="text-brand-danger">*</span>
                 </label>
                 <button
                   type="button"
                   onClick={() => handleAddNewClick("sizes")}
-                  className="text-[10px] font-bold text-brand-accent hover:text-blue-600 transition-colors uppercase tracking-wider"
+                  className="text-[14px] font-bold text-brand-accent hover:text-blue-600 transition-colors uppercase tracking-wider"
                 >
                   + Add New Size
                 </button>
@@ -336,7 +363,7 @@ function AddStock() {
                 name="size"
                 value={formData.size}
                 onChange={handleInputChange}
-                className="h-11 w-full rounded-xl border border-brand-border bg-white px-4 text-sm font-semibold outline-none focus:border-brand-primary/60 focus:ring-2 focus:ring-brand-primary/10"
+                className="h-12 w-full rounded-xl border border-brand-border bg-white px-4 text-[16px] font-medium outline-none focus:border-brand-primary/60 focus:ring-2 focus:ring-brand-primary/10"
                 required
               >
                 <option value="">Select Size</option>
@@ -348,13 +375,13 @@ function AddStock() {
 
             <div>
               <div className="flex items-center justify-between mb-2">
-                <label className="block text-xs font-bold uppercase tracking-wider text-brand-subtext">
+                <label className="block text-[15px] font-bold uppercase tracking-wider text-brand-subtext">
                   Color <span className="text-brand-danger">*</span>
                 </label>
                 <button
                   type="button"
                   onClick={() => handleAddNewClick("colors")}
-                  className="text-[10px] font-bold text-brand-accent hover:text-blue-600 transition-colors uppercase tracking-wider"
+                  className="text-[14px] font-bold text-brand-accent hover:text-blue-600 transition-colors uppercase tracking-wider"
                 >
                   + Add New Color
                 </button>
@@ -363,7 +390,7 @@ function AddStock() {
                 name="color"
                 value={formData.color}
                 onChange={handleInputChange}
-                className="h-11 w-full rounded-xl border border-brand-border bg-white px-4 text-sm font-semibold outline-none focus:border-brand-primary/60 focus:ring-2 focus:ring-brand-primary/10"
+                className="h-12 w-full rounded-xl border border-brand-border bg-white px-4 text-[16px] font-medium outline-none focus:border-brand-primary/60 focus:ring-2 focus:ring-brand-primary/10"
                 required
               >
                 <option value="">Select Color</option>
@@ -375,15 +402,15 @@ function AddStock() {
           </div>
 
           {checkingSerial && (
-            <div className="flex items-center justify-center gap-2 text-xs font-semibold text-brand-primary py-2 bg-slate-50 rounded-xl border border-dashed border-brand-border animate-pulse">
+            <div className="flex items-center justify-center gap-2 text-[15px] font-medium text-brand-primary py-2.5 bg-slate-50 rounded-xl border border-dashed border-brand-border animate-pulse">
               <RefreshCw className="h-4 w-4 animate-spin text-brand-primary" />
               <span>Checking product database...</span>
             </div>
           )}
 
           {isExisting && (
-            <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-xs font-bold text-brand-warning flex items-center gap-2">
-              <Sparkles className="h-4 w-4 shrink-0 text-brand-warning animate-pulse" />
+            <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-[15px] font-bold text-brand-warning flex items-center gap-2">
+              <Sparkles className="h-5 w-5 shrink-0 text-brand-warning animate-pulse" />
               <div>Existing Product Combination Found! Stock will be topped up. SKU: <span className="underline">{formData.serial_no}</span></div>
             </div>
           )}
@@ -391,7 +418,7 @@ function AddStock() {
           {/* Financial Details Row */}
           <div className="grid gap-5 md:grid-cols-2">
             <div>
-              <label className="block text-xs font-bold uppercase tracking-wider text-brand-subtext mb-2">
+              <label className="block text-[15px] font-bold uppercase tracking-wider text-brand-subtext mb-2">
                 Purchase Price (₹) <span className="text-brand-danger">*</span>
               </label>
               <input
@@ -400,13 +427,13 @@ function AddStock() {
                 value={formData.purchase_price}
                 onChange={handleInputChange}
                 placeholder="Cost price"
-                className="h-11 w-full rounded-xl border border-brand-border bg-white px-4 text-sm font-semibold outline-none focus:border-brand-primary/60 focus:ring-2 focus:ring-brand-primary/10"
+                className="h-12 w-full rounded-xl border border-brand-border bg-white px-4 text-[16px] placeholder:text-[15px] font-medium outline-none focus:border-brand-primary/60 focus:ring-2 focus:ring-brand-primary/10"
                 required
               />
             </div>
 
             <div>
-              <label className="block text-xs font-bold uppercase tracking-wider text-brand-subtext mb-2">
+              <label className="block text-[15px] font-bold uppercase tracking-wider text-brand-subtext mb-2">
                 Selling Price (₹) <span className="text-brand-danger">*</span>
               </label>
               <input
@@ -415,7 +442,7 @@ function AddStock() {
                 value={formData.selling_price}
                 onChange={handleInputChange}
                 placeholder="Retail price"
-                className="h-11 w-full rounded-xl border border-brand-border bg-white px-4 text-sm font-semibold outline-none focus:border-brand-primary/60 focus:ring-2 focus:ring-brand-primary/10"
+                className="h-12 w-full rounded-xl border border-brand-border bg-white px-4 text-[16px] placeholder:text-[15px] font-medium outline-none focus:border-brand-primary/60 focus:ring-2 focus:ring-brand-primary/10"
                 required
               />
             </div>
@@ -424,7 +451,7 @@ function AddStock() {
           {/* Inventory & Logistics Row */}
           <div className="grid gap-5 md:grid-cols-2">
             <div>
-              <label className="block text-xs font-bold uppercase tracking-wider text-brand-subtext mb-2">
+              <label className="block text-[15px] font-bold uppercase tracking-wider text-brand-subtext mb-2">
                 {isExisting ? "Qty to ADD (Top up)" : "Stock Quantity"} <span className="text-brand-danger">*</span>
               </label>
               <input
@@ -433,22 +460,52 @@ function AddStock() {
                 value={formData.stock}
                 onChange={handleInputChange}
                 placeholder={isExisting ? "e.g. 15 (adds to catalog)" : "Initial stock"}
-                className="h-11 w-full rounded-xl border border-brand-border bg-white px-4 text-sm font-semibold outline-none focus:border-brand-primary/60 focus:ring-2 focus:ring-brand-primary/10"
+                className="h-12 w-full rounded-xl border border-brand-border bg-white px-4 text-[16px] placeholder:text-[15px] font-medium outline-none focus:border-brand-primary/60 focus:ring-2 focus:ring-brand-primary/10"
                 required
               />
             </div>
 
             <div>
-              <label className="block text-xs font-bold uppercase tracking-wider text-brand-subtext mb-2">
-                Supplier Name
-              </label>
-              <input
-                type="text"
+              <div className="flex items-center justify-between mb-2">
+                <label className="block text-[15px] font-bold uppercase tracking-wider text-brand-subtext">
+                  Supplier Name <span className="text-brand-danger">*</span>
+                </label>
+                <button
+                  type="button"
+                  onClick={() => handleAddNewClick("suppliers")}
+                  className="text-[14px] font-bold text-brand-accent hover:text-blue-600 transition-colors uppercase tracking-wider"
+                >
+                  + Add New Supplier
+                </button>
+              </div>
+              <select
                 name="supplier_name"
                 value={formData.supplier_name}
                 onChange={handleInputChange}
-                placeholder="Wholesale vendor name"
-                className="h-11 w-full rounded-xl border border-brand-border bg-white px-4 text-sm font-semibold outline-none focus:border-brand-primary/60 focus:ring-2 focus:ring-brand-primary/10"
+                className="h-12 w-full rounded-xl border border-brand-border bg-white px-4 text-[16px] font-medium outline-none focus:border-brand-primary/60 focus:ring-2 focus:ring-brand-primary/10"
+                required
+              >
+                <option value="">Select Supplier</option>
+                {filterOptions.suppliers && filterOptions.suppliers.map((s) => (
+                  <option key={s} value={s}>{s}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          {/* Purchase Details Row */}
+          <div className="grid gap-5 md:grid-cols-2">
+            <div>
+              <label className="block text-[15px] font-bold uppercase tracking-wider text-brand-subtext mb-2">
+                Purchase Reference Number
+              </label>
+              <input
+                type="text"
+                name="purchase_ref_no"
+                value={formData.purchase_ref_no}
+                onChange={handleInputChange}
+                placeholder="Auto-generated if left blank"
+                className="h-12 w-full rounded-xl border border-brand-border bg-white px-4 text-[16px] placeholder:text-[15px] font-bold outline-none focus:border-brand-primary/60 focus:ring-2 focus:ring-brand-primary/10 uppercase"
               />
             </div>
           </div>
@@ -457,8 +514,8 @@ function AddStock() {
           {inlineModal.isOpen && (
             <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4 backdrop-blur-xs">
               <div className="w-full max-w-sm bg-white rounded-2xl border border-brand-border shadow-premium overflow-hidden animate-slide-up">
-                <div className="flex items-center justify-between border-b border-brand-border px-5 py-4 bg-slate-50/50">
-                  <h3 className="text-xs font-extrabold text-brand-text uppercase tracking-wider">
+                <div className="flex items-center justify-between border-b border-brand-border px-6 py-4 bg-slate-50/50">
+                  <h3 className="text-[20px] font-bold text-brand-text uppercase tracking-wider">
                     Create New {inlineModal.label}
                   </h3>
                   <button 
@@ -466,18 +523,18 @@ function AddStock() {
                     onClick={() => setInlineModal(prev => ({ ...prev, isOpen: false }))}
                     className="text-brand-subtext hover:text-brand-text transition-colors"
                   >
-                    <X className="h-4.5 w-4.5" />
+                    <X className="h-5 w-5" />
                   </button>
                 </div>
-                <div className="p-5 space-y-4">
+                <div className="p-6 space-y-4">
                   {inlineModal.error && (
-                    <div className="rounded-xl p-3 text-xs font-bold border bg-red-50 text-brand-danger border-red-200 flex items-start gap-2">
+                    <div className="rounded-xl p-3 text-[14px] font-bold border bg-red-50 text-brand-danger border-red-200 flex items-start gap-2">
                       <AlertTriangle className="h-4 w-4 shrink-0 text-brand-danger" />
                       <div>{inlineModal.error}</div>
                     </div>
                   )}
                   <div>
-                    <label className="block text-[10px] font-bold uppercase tracking-wider text-brand-subtext mb-2">
+                    <label className="block text-[15px] font-bold uppercase tracking-wider text-brand-subtext mb-2">
                       {inlineModal.label} Name <span className="text-brand-danger">*</span>
                     </label>
                     <input
@@ -485,7 +542,7 @@ function AddStock() {
                       value={inlineModal.value}
                       onChange={(e) => setInlineModal(prev => ({ ...prev, value: e.target.value }))}
                       placeholder={`Enter new ${inlineModal.label.toLowerCase()}...`}
-                      className="h-11 w-full rounded-xl border border-brand-border bg-white px-4 text-sm font-semibold outline-none focus:border-brand-primary/60 focus:ring-2 focus:ring-brand-primary/10"
+                      className="h-12 w-full rounded-xl border border-brand-border bg-white px-4 text-[16px] placeholder:text-[15px] font-medium outline-none focus:border-brand-primary/60 focus:ring-2 focus:ring-brand-primary/10"
                       required
                       autoFocus
                     />
@@ -494,7 +551,7 @@ function AddStock() {
                     <button
                       type="button"
                       onClick={() => setInlineModal(prev => ({ ...prev, isOpen: false }))}
-                      className="px-4 py-2.5 rounded-xl border border-brand-border bg-white text-xs font-bold text-brand-subtext hover:bg-slate-50 transition-colors"
+                      className="px-5 py-2.5 rounded-xl border border-brand-border bg-white text-[15px] font-bold text-brand-subtext hover:bg-slate-50 transition-colors"
                     >
                       Cancel
                     </button>
@@ -502,9 +559,9 @@ function AddStock() {
                       type="button"
                       onClick={handleInlineSubmit}
                       disabled={inlineModal.submitting}
-                      className="flex items-center gap-1.5 px-5 py-2.5 rounded-xl bg-brand-accent text-xs font-bold text-white shadow-md shadow-brand-accent/20 hover:bg-blue-600 transition-all disabled:opacity-55"
+                      className="flex items-center gap-1.5 px-6 py-2.5 rounded-xl bg-brand-accent text-[15px] font-bold text-white shadow-md shadow-brand-accent/20 hover:bg-blue-600 transition-all disabled:opacity-55"
                     >
-                      {inlineModal.submitting && <RefreshCw className="h-3.5 w-3.5 animate-spin" />}
+                      {inlineModal.submitting && <RefreshCw className="h-4 w-4 animate-spin" />}
                       Save
                     </button>
                   </div>
@@ -518,20 +575,20 @@ function AddStock() {
             <button
               type="button"
               onClick={handleClear}
-              className="flex items-center gap-2 rounded-xl border border-brand-border bg-white px-5 py-3 text-xs font-bold text-brand-subtext transition-all hover:bg-slate-50 hover:text-brand-text"
+              className="flex items-center gap-2 rounded-xl border border-brand-border bg-white px-6 py-3.5 text-[15px] font-bold text-brand-subtext transition-all hover:bg-slate-50 hover:text-brand-text"
             >
-              <Trash2 className="h-4 w-4" />
+              <Trash2 className="h-5 w-5" />
               Clear Form
             </button>
             <button
               type="submit"
               disabled={submitting}
-              className="flex items-center gap-2 rounded-xl bg-brand-accent px-6 py-3 text-xs font-bold text-white shadow-md shadow-brand-accent/20 transition-all hover:bg-blue-600 hover:shadow-lg focus:ring-2 focus:ring-brand-accent/20 disabled:bg-brand-primary/50"
+              className="flex items-center gap-2 rounded-xl bg-brand-accent px-7 py-3.5 text-[15px] font-bold text-white shadow-md shadow-brand-accent/20 transition-all hover:bg-blue-600 hover:shadow-lg focus:ring-2 focus:ring-brand-accent/20 disabled:bg-brand-primary/50"
             >
               {submitting ? (
-                <RefreshCw className="h-4 w-4 animate-spin" />
+                <RefreshCw className="h-5 w-5 animate-spin" />
               ) : (
-                <PackageOpen className="h-4 w-4" />
+                <PackageOpen className="h-5 w-5" />
               )}
               {isExisting ? "Top Up Stock" : "Save Product"}
             </button>

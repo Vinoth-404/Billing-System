@@ -8,7 +8,9 @@ export const SettingsProvider = ({ children }) => {
     shop_name: localStorage.getItem("settings_shopName") || "SoleFlow Footwear",
     shop_address: localStorage.getItem("settings_shopAddress") || "123 Shoe Market St, T. Nagar, Chennai",
     shop_phone: localStorage.getItem("settings_shopPhone") || "+91 98765 43210",
-    shop_logo: localStorage.getItem("settings_shopLogo") || ""
+    shop_logo: localStorage.getItem("settings_shopLogo") || "",
+    stock_threshold: parseInt(localStorage.getItem("settings_stockThreshold") || "5", 10),
+    has_recovery_pin: localStorage.getItem("settings_hasRecoveryPin") === "true"
   });
 
   const loadSettings = async () => {
@@ -19,7 +21,9 @@ export const SettingsProvider = ({ children }) => {
           shop_name: res.data.shop_name || "SoleFlow Footwear",
           shop_address: res.data.shop_address || "123 Shoe Market St, T. Nagar, Chennai",
           shop_phone: res.data.shop_phone || "+91 98765 43210",
-          shop_logo: res.data.shop_logo || ""
+          shop_logo: res.data.shop_logo || "",
+          stock_threshold: parseInt(res.data.stock_threshold || "5", 10),
+          has_recovery_pin: Boolean(res.data.has_recovery_pin)
         };
         setSettings(settingsMap);
         
@@ -28,6 +32,8 @@ export const SettingsProvider = ({ children }) => {
         localStorage.setItem("settings_shopAddress", settingsMap.shop_address);
         localStorage.setItem("settings_shopPhone", settingsMap.shop_phone);
         localStorage.setItem("settings_shopLogo", settingsMap.shop_logo);
+        localStorage.setItem("settings_stockThreshold", settingsMap.stock_threshold.toString());
+        localStorage.setItem("settings_hasRecoveryPin", settingsMap.has_recovery_pin ? "true" : "false");
       }
     } catch (err) {
       console.error("Failed to load settings in context:", err);

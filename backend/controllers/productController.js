@@ -1,159 +1,56 @@
 const db = require("../config/db");
 const { sendSMS } = require("../services/smsService");
 const bcrypt = require("bcryptjs");
+const { syncProductNotifications } = require("../services/notificationService");
+const bwipjs = require("bwip-js");
 
 // Helper to execute query with promise
-const query = (sql, params = []) => {
-  return new Promise((resolve, reject) => {
-    db.query(sql, params, (err, results) => {
-      if (err) reject(err);
-      else resolve(results);
-    });
-  });
-};
-
-// Sync active alerts (low stock/out of stock notifications) in database
-const syncProductNotifications = (productId, stock, brand, type, size, color) => {
-  return new Promise(async (resolve, reject) => {
-    try {
-      const thresholdRes = await query("SELECT setting_value FROM settings WHERE setting_key = 'stock_threshold'");
-      const threshold = thresholdRes.length > 0 ? parseInt(thresholdRes[0].setting_value, 10) : 5;
-
-      const prodRes = await query("SELECT serial_no FROM products WHERE id = ?", [productId]);
-      const sku = prodRes.length > 0 ? prodRes[0].serial_no : "N/A";
-
-      const lowStockMsg = `⚠️ Low Stock Alert\nProduct: ${brand} ${type} ${color} Size ${size}\nSKU: ${sku}\nAvailable Stock: ${stock} pairs\nThreshold: ${threshold} pairs`;
-      const outOfStockMsg = `🚫 Out of Stock\nProduct: ${brand} ${type} ${color} Size ${size}\nSKU: ${sku}`;
-
-      if (stock >= threshold) {
-        db.query(
-          "DELETE FROM notifications WHERE product_id = ? AND type IN ('low_stock', 'out_of_stock')",
-          [productId],
-          (err) => {
-            if (err) return reject(err);
-            resolve();
-          }
-        );
-      } else if (stock > 0 && stock < threshold) {
-        db.query(
-          "DELETE FROM notifications WHERE product_id = ? AND type = 'out_of_stock'",
-          [productId],
-          (err) => {
-            if (err) return reject(err);
-            db.query(
-              "SELECT * FROM notifications WHERE product_id = ? AND type = 'low_stock'",
-              [productId],
-              (selErr, selRes) => {
-                if (selErr) return reject(selErr);
-                if (selRes.length > 0) {
-                  db.query(
-                    "UPDATE notifications SET message = ? WHERE id = ?",
-                    [lowStockMsg, selRes[0].id],
-                    (upErr) => {
-                      if (upErr) return reject(upErr);
-                      resolve();
-                    }
-                  );
-                } else {
-                  db.query(
-                    "INSERT INTO notifications (type, message, product_id) VALUES ('low_stock', ?, ?)",
-                    [lowStockMsg, productId],
-                    async (insErr) => {
-                      if (insErr) return reject(insErr);
-                      const smsMessage = `Low Stock Alert\n\n${brand} ${type}\nCurrent Stock: ${stock} pairs\n\nPlease restock soon.`;
-                      await sendSMS("sms_low_stock", smsMessage);
-                      resolve();
-                    }
-                  );
-                }
-              }
-            );
-          }
-        );
-      } else if (stock === 0) {
-        db.query(
-          "DELETE FROM notifications WHERE product_id = ? AND type = 'low_stock'",
-          [productId],
-          (err) => {
-            if (err) return reject(err);
-            db.query(
-              "SELECT * FROM notifications WHERE product_id = ? AND type = 'out_of_stock'",
-              [productId],
-              (selErr, selRes) => {
-                if (selErr) return reject(selErr);
-                if (selRes.length > 0) {
-                  db.query(
-                    "UPDATE notifications SET message = ? WHERE id = ?",
-                    [outOfStockMsg, selRes[0].id],
-                    (upErr) => {
-                      if (upErr) return reject(upErr);
-                      resolve();
-                    }
-                  );
-                } else {
-                  db.query(
-                    "INSERT INTO notifications (type, message, product_id) VALUES ('out_of_stock', ?, ?)",
-                    [outOfStockMsg, productId],
-                    async (insErr) => {
-                      if (insErr) return reject(insErr);
-                      const smsMessage = `Out Of Stock Alert\n\n${brand} ${type}\nCurrent Stock: 0\n\nImmediate restocking required.`;
-                      await sendSMS("sms_out_of_stock", smsMessage);
-                      resolve();
-                    }
-                  );
-                }
-              }
-            );
-          }
-        );
-      } else {
-        resolve();
-      }
-    } catch (e) {
-      reject(e);
-    }
-  });
+const query = async (sql, params = []) => {
+  const [results] = await db.query(sql, params);
+  return results;
 };
 
 // Get all products
-exports.getProducts = (req, res) => {
-  db.query("SELECT * FROM products ORDER BY created_at DESC", (err, result) => {
-    if (err) {
-      return res.status(500).json({ error: err.message });
-    }
+exports.getProducts = async (req, res) => {
+  try {
+    const result = await query("SELECT * FROM products ORDER BY created_at DESC");
     res.json(result);
-  });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 };
 
 // Get single product by Serial Number
-exports.getProductBySerial = (req, res) => {
+exports.getProductBySerial = async (req, res) => {
   const { serial_no } = req.params;
-  db.query("SELECT * FROM products WHERE serial_no = ?", [serial_no], (err, result) => {
-    if (err) {
-      return res.status(500).json({ error: err.message });
-    }
+  try {
+    const result = await query("SELECT * FROM products WHERE serial_no = ?", [serial_no]);
     if (result.length === 0) {
       return res.status(404).json({ message: "Product not found" });
     }
     res.json(result[0]);
-  });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 };
 
-// Get unique product filters (Brand, Type, Size, Color)
+// Get unique product filters (Brand, Type, Size, Color, Supplier)
 exports.getProductFilters = async (req, res) => {
   try {
-    const [brands, types, sizes, colors] = await Promise.all([
+    const [brands, types, sizes, colors, suppliers] = await Promise.all([
       query("SELECT name FROM brands ORDER BY name"),
       query("SELECT name FROM product_types ORDER BY name"),
       query("SELECT name FROM sizes ORDER BY CAST(name AS UNSIGNED), name"),
-      query("SELECT name FROM colors ORDER BY name")
+      query("SELECT name FROM colors ORDER BY name"),
+      query("SELECT name FROM suppliers ORDER BY name")
     ]);
 
     res.json({
       brands: brands.map(b => b.name),
       types: types.map(t => t.name),
       sizes: sizes.map(s => s.name),
-      colors: colors.map(c => c.name)
+      colors: colors.map(c => c.name),
+      suppliers: suppliers.map(s => s.name)
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -161,28 +58,31 @@ exports.getProductFilters = async (req, res) => {
 };
 
 // Get product by attributes
-exports.getProductByAttributes = (req, res) => {
+exports.getProductByAttributes = async (req, res) => {
   const { brand, type, size, color } = req.query;
   if (!brand || !type || !size || !color) {
     return res.status(400).json({ error: "Missing attributes query" });
   }
-  db.query(
-    "SELECT * FROM products WHERE brand = ? AND type = ? AND size = ? AND color = ?",
-    [brand, type, size, color],
-    (err, result) => {
-      if (err) {
-        return res.status(500).json({ error: err.message });
-      }
-      if (result.length === 0) {
-        return res.status(404).json({ message: "Product not found" });
-      }
-      res.json(result[0]);
+  try {
+    const result = await query(
+      "SELECT * FROM products WHERE brand = ? AND type = ? AND size = ? AND color = ?",
+      [brand, type, size, color]
+    );
+    if (result.length === 0) {
+      return res.status(404).json({ message: "Product not found" });
     }
-  );
+    res.json(result[0]);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 };
 
 // Add or update stock
 exports.addOrUpdateStock = async (req, res) => {
+  console.log("--- addOrUpdateStock: RECEIVED REQUEST BODY ---");
+  console.log(req.body);
+  console.log("-----------------------------------------------");
+
   const {
     brand,
     type,
@@ -192,11 +92,13 @@ exports.addOrUpdateStock = async (req, res) => {
     selling_price,
     discount_percent,
     stock,
-    supplier_name
+    supplier_name,
+    article_number,
+    purchase_ref_no
   } = req.body;
 
-  if (!brand || !type || !size || !color || purchase_price === undefined || selling_price === undefined || stock === undefined) {
-    return res.status(400).json({ error: "Missing required fields" });
+  if (!brand || !type || !size || !color || purchase_price === undefined || selling_price === undefined || stock === undefined || !supplier_name || supplier_name.trim() === "") {
+    return res.status(400).json({ error: "Missing required fields (including Supplier Name)" });
   }
 
   const stockVal = parseInt(stock);
@@ -211,21 +113,68 @@ exports.addOrUpdateStock = async (req, res) => {
     if (result.length > 0) {
       // Product exists, update stock
       const existingProduct = result[0];
+
+      // If the article number is changing or being set for the first time, check uniqueness
+      const targetArticleNumber = article_number ? article_number.trim().toUpperCase() : "";
+      if (targetArticleNumber && targetArticleNumber !== existingProduct.article_number) {
+        const dupCheck = await query("SELECT * FROM products WHERE article_number = ? AND id != ?", [targetArticleNumber, existingProduct.id]);
+        if (dupCheck.length > 0) {
+          return res.status(400).json({ error: "Article Number already exists on another product." });
+        }
+      }
+
+      let finalArticleNumber = targetArticleNumber || existingProduct.article_number;
+      if (!finalArticleNumber) {
+        const cleanBrand = brand ? brand.trim().toUpperCase().replace(/[^A-Z]/g, "") : "ART";
+        const prefix = cleanBrand.length > 3 ? cleanBrand.substring(0, 4) : (cleanBrand || "ART");
+        finalArticleNumber = `${prefix}-${1000 + existingProduct.id}`;
+      }
+
       const newStock = existingProduct.stock + stockVal;
 
       const updateSql = `
         UPDATE products 
-        SET purchase_price = ?, selling_price = ?, discount_percent = ?, stock = ?, supplier_name = ?
+        SET article_number = ?, purchase_price = ?, selling_price = ?, discount_percent = ?, stock = ?, supplier_name = ?
         WHERE id = ?
       `;
-      const values = [purchase_price, selling_price, discount_percent || 0, newStock, supplier_name || null, existingProduct.id];
+      const values = [
+        finalArticleNumber,
+        purchase_price,
+        selling_price,
+        discount_percent || 0,
+        newStock,
+        supplier_name || null,
+        existingProduct.id
+      ];
 
+      console.log("Executing UPDATE SQL query:", updateSql);
+      console.log("Parameters array (values):", values);
       await query(updateSql, values);
+
+      // Log to purchase_history
+      const purchaseRefNo = purchase_ref_no ? purchase_ref_no.trim() : `PO-${new Date().getFullYear()}-${Math.floor(1000 + Math.random() * 9000)}`;
+      await query(
+        `INSERT INTO purchase_history (product_id, purchase_date, purchase_ref_no, supplier_name, article_number, brand, type, size, color, quantity, purchase_price, total_value)
+         VALUES (?, NOW(), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          existingProduct.id,
+          purchaseRefNo,
+          supplier_name,
+          finalArticleNumber,
+          brand,
+          type,
+          size,
+          color,
+          stockVal,
+          purchase_price,
+          stockVal * purchase_price
+        ]
+      );
       
       // Log to activity_log
       db.query(
         "INSERT INTO activity_log (type, message) VALUES ('addition', ?)",
-        [`Added ${stockVal} ${brand} ${type}s`],
+        [`Added ${stockVal} ${brand} ${type}s (Supplier: ${supplier_name})`],
         (logErr) => {
           if (logErr) console.error("Error writing stock activity log:", logErr);
         }
@@ -250,36 +199,89 @@ exports.addOrUpdateStock = async (req, res) => {
 
       res.json({ message: "Product stock updated successfully", product: { ...existingProduct, stock: newStock } });
     } else {
-      // Product does not exist. Auto-generate a new unique SKU/Serial Number.
-      const rows = await query("SELECT serial_no FROM products");
-      let maxNum = 0;
-      for (const row of rows) {
-        const match = row.serial_no.match(/^(?:SKU|SLIP)-([0-9]+)$/i);
-        if (match) {
-          const num = parseInt(match[1], 10);
-          if (num > maxNum) {
-            maxNum = num;
-          }
-        }
+      // Product does not exist. Check if article number is provided and is unique
+      if (!article_number || article_number.trim() === "") {
+        return res.status(400).json({ error: "Article Number is required." });
       }
+
+      const formattedArticleNumber = article_number.trim().toUpperCase();
+
+      const existingArt = await query("SELECT * FROM products WHERE article_number = ?", [formattedArticleNumber]);
+      if (existingArt.length > 0) {
+        return res.status(400).json({ error: "Article Number already exists." });
+      }
+
+      // Auto-generate a new unique SKU/Serial Number using an optimized SQL query.
+      const maxRow = await query(`
+        SELECT MAX(CAST(SUBSTRING(serial_no, LOCATE('-', serial_no) + 1) AS UNSIGNED)) AS maxNum 
+        FROM products 
+        WHERE serial_no LIKE 'SKU-%' OR serial_no LIKE 'SLIP-%'
+      `);
+      const maxNum = maxRow[0].maxNum || 0;
       
       const nextNum = maxNum + 1;
       const serial_no = `SKU-${String(nextNum).padStart(3, '0')}`;
 
-      // Insert new row
       const insertSql = `
-        INSERT INTO products (serial_no, brand, type, size, color, purchase_price, selling_price, discount_percent, stock, supplier_name)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO products (serial_no, brand, type, size, color, purchase_price, selling_price, discount_percent, stock, supplier_name, article_number)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `;
-      const values = [serial_no, brand, type, size, color, purchase_price, selling_price, discount_percent || 0, stockVal, supplier_name || null];
+      const values = [
+        serial_no, 
+        brand, 
+        type, 
+        size, 
+        color, 
+        purchase_price, 
+        selling_price, 
+        discount_percent || 0, 
+        stockVal, 
+        supplier_name || null, 
+        formattedArticleNumber
+      ];
 
+      console.log("Executing INSERT SQL query:", insertSql);
+      console.log("Parameters array (values):", values);
       const insertResult = await query(insertSql, values);
       const newId = insertResult.insertId;
+
+      // Automatically generate a unique barcode using BC-[newId] padded
+      const generatedBarcode = `BC-${String(newId).padStart(6, '0')}`;
+      await query(
+        "UPDATE products SET barcode = ?, barcode_generated_at = NOW() WHERE id = ?",
+        [generatedBarcode, newId]
+      );
+
+      // Log to purchase_history
+      const purchaseRefNo = purchase_ref_no ? purchase_ref_no.trim() : `PO-${new Date().getFullYear()}-${Math.floor(1000 + Math.random() * 9000)}`;
+      await query(
+        `INSERT INTO purchase_history (product_id, purchase_date, purchase_ref_no, supplier_name, article_number, brand, type, size, color, quantity, purchase_price, total_value)
+         VALUES (?, NOW(), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          newId,
+          purchaseRefNo,
+          supplier_name,
+          formattedArticleNumber,
+          brand,
+          type,
+          size,
+          color,
+          stockVal,
+          purchase_price,
+          stockVal * purchase_price
+        ]
+      );
+
+      // After INSERT, immediately select to verify status of article_number in database
+      const checkRow = await query("SELECT serial_no, article_number FROM products WHERE id = ?", [newId]);
+      console.log("--- SELECT serial_no, article_number immediately after INSERT ---");
+      console.log(checkRow[0]);
+      console.log("-----------------------------------------------------------------");
 
       // Log to activity_log
       db.query(
         "INSERT INTO activity_log (type, message) VALUES ('addition', ?)",
-        [`Added ${stockVal} ${brand} ${type}s`],
+        [`Added ${stockVal} ${brand} ${type}s (Supplier: ${supplier_name})`],
         (logErr) => {
           if (logErr) console.error("Error writing product addition activity log:", logErr);
         }
@@ -299,8 +301,129 @@ exports.addOrUpdateStock = async (req, res) => {
       syncProductNotifications(newId, stockVal, brand, type, size, color)
         .catch((syncErr) => console.error("Error syncing stock notifications:", syncErr));
 
-      res.status(201).json({ message: "Product created successfully", id: newId, serial_no });
+      res.status(201).json({ 
+        message: "Product created successfully", 
+        id: newId, 
+        serial_no, 
+        article_number: article_number.trim(),
+        barcode: generatedBarcode
+      });
     }
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};
+
+// Get single product details by Article Number
+exports.getProductByArticleNumber = async (req, res) => {
+  const { articleNumber } = req.params;
+  try {
+    const results = await query(
+      "SELECT id, article_number, brand, type, size, color, purchase_price, selling_price, stock, supplier_name AS supplier, discount_percent, barcode FROM products WHERE article_number = ?",
+      [articleNumber]
+    );
+    if (results.length === 0) {
+      return res.status(404).json({ error: "Article Number not found." });
+    }
+    const product = results[0];
+    if (!product.barcode) {
+      const generatedBarcode = `BC-${String(product.id).padStart(6, '0')}`;
+      await query(
+        "UPDATE products SET barcode = ?, barcode_generated_at = NOW() WHERE id = ?",
+        [generatedBarcode, product.id]
+      );
+      product.barcode = generatedBarcode;
+    }
+    res.json(product);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};
+
+// Edit product details (validate article number uniqueness)
+exports.editProduct = async (req, res) => {
+  const { id } = req.params;
+  const { article_number, brand, type, size, color, purchase_price, selling_price, stock, supplier_name } = req.body;
+
+  if (!article_number || article_number.trim() === "") {
+    return res.status(400).json({ error: "Article Number is required." });
+  }
+
+  if (!supplier_name || supplier_name.trim() === "") {
+    return res.status(400).json({ error: "Supplier Name is required." });
+  }
+
+  const formattedArticleNumber = article_number.trim().toUpperCase();
+
+  try {
+    // 1. Check if another product already uses this article number
+    const dupCheck = await query(
+      "SELECT * FROM products WHERE article_number = ? AND id != ?",
+      [formattedArticleNumber, id]
+    );
+    if (dupCheck.length > 0) {
+      return res.status(400).json({ error: "Article Number already exists." });
+    }
+
+    // 2. Update product
+    const updateSql = `
+      UPDATE products 
+      SET article_number = ?, brand = ?, type = ?, size = ?, color = ?, purchase_price = ?, selling_price = ?, stock = ?, supplier_name = ?
+      WHERE id = ?
+    `;
+    const values = [
+      formattedArticleNumber,
+      brand,
+      type,
+      size,
+      color,
+      purchase_price,
+      selling_price,
+      stock,
+      supplier_name || null,
+      id
+    ];
+
+    await query(updateSql, values);
+    
+    // Log to activity_log
+    db.query(
+      "INSERT INTO activity_log (type, message) VALUES ('edit', ?)",
+      [`Updated product ${brand} ${type} (Supplier: ${supplier_name})`],
+      (logErr) => {
+        if (logErr) console.error("Error writing product edit activity log:", logErr);
+      }
+    );
+    
+    // Check if we should update references in sale_items (Cascade)
+    await query("UPDATE sale_items SET article_number = ? WHERE product_id = ?", [article_number.trim(), id]);
+
+    res.json({ message: "Product updated successfully." });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};
+
+// Delete a product by its ID
+exports.deleteProduct = async (req, res) => {
+  const { id } = req.params;
+  try {
+    // 1. Check if product is referenced in sale_items
+    const salesCheck = await query("SELECT COUNT(*) AS count FROM sale_items WHERE product_id = ?", [id]);
+    if (salesCheck[0].count > 0) {
+      return res.status(400).json({ error: "Cannot delete this product. It has associated sales history records." });
+    }
+
+    // 2. Delete associated notifications
+    await query("DELETE FROM notifications WHERE product_id = ?", [id]);
+
+    // 3. Delete product
+    const deleteResult = await query("DELETE FROM products WHERE id = ?", [id]);
+    if (deleteResult.affectedRows === 0) {
+      return res.status(404).json({ error: "Product not found." });
+    }
+
+    res.json({ message: "Product deleted successfully." });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -311,6 +434,7 @@ const getTableName = (category) => {
   if (category === "types") return "product_types";
   if (category === "colors") return "colors";
   if (category === "sizes") return "sizes";
+  if (category === "suppliers") return "suppliers";
   if (category === "expense_categories") return "expense_categories";
   return null;
 };
@@ -357,6 +481,7 @@ const getColumnName = (category) => {
   if (category === "types") return "type";
   if (category === "sizes") return "size";
   if (category === "colors") return "color";
+  if (category === "suppliers") return "supplier_name";
   if (category === "expense_categories") return "category";
   return null;
 };
@@ -389,7 +514,9 @@ exports.editMasterItem = async (req, res) => {
           await query(`UPDATE expenses SET category = ? WHERE category = ?`, [newName, oldName]);
         } else {
           await query(`UPDATE products SET ${col} = ? WHERE ${col} = ?`, [newName, oldName]);
-          await query(`UPDATE sale_items SET ${col} = ? WHERE ${col} = ?`, [newName, oldName]);
+          if (col !== "supplier_name") {
+            await query(`UPDATE sale_items SET ${col} = ? WHERE ${col} = ?`, [newName, oldName]);
+          }
         }
       }
     }
@@ -434,6 +561,7 @@ exports.deleteMasterItem = async (req, res) => {
           if (category === "types") categoryLabel = "product type";
           if (category === "sizes") categoryLabel = "size";
           if (category === "colors") categoryLabel = "color";
+          if (category === "suppliers") categoryLabel = "supplier";
           return res.status(400).json({ 
             error: `Cannot delete. This ${categoryLabel} is currently used by existing products.` 
           });
@@ -455,8 +583,15 @@ exports.getSettings = async (req, res) => {
     const results = await query("SELECT * FROM settings");
     const settingsMap = {};
     results.forEach(row => {
-      settingsMap[row.setting_key] = row.setting_value;
+      if (row.setting_key === "recovery_pin") {
+        settingsMap.has_recovery_pin = Boolean(row.setting_value && row.setting_value.trim() !== "");
+      } else {
+        settingsMap[row.setting_key] = row.setting_value;
+      }
     });
+    if (settingsMap.has_recovery_pin === undefined) {
+      settingsMap.has_recovery_pin = false;
+    }
     res.json(settingsMap);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -466,16 +601,33 @@ exports.getSettings = async (req, res) => {
 // Update settings
 exports.saveSettings = async (req, res) => {
   const settings = req.body;
+  console.log("[Settings] Save request received. Keys:", Object.keys(settings).join(", "));
+
+  // Protect admin_password and recovery_pin — they cannot be changed via general settings endpoint
+  const PROTECTED_KEYS = ["admin_password", "recovery_pin"];
+
   try {
     for (const key of Object.keys(settings)) {
+      if (PROTECTED_KEYS.includes(key)) {
+        console.log(`[Settings] Skipping protected key: ${key}`);
+        continue;
+      }
+      const value = settings[key] === null || settings[key] === undefined ? "" : String(settings[key]);
+      console.log(`[Settings] Saving key="${key}" value_length=${value.length}`);
       await query(
         "INSERT INTO settings (setting_key, setting_value) VALUES (?, ?) ON DUPLICATE KEY UPDATE setting_value = ?",
-        [key, String(settings[key]), String(settings[key])]
+        [key, value, value]
       );
     }
+    if (Object.keys(settings).includes("stock_threshold")) {
+      const { resyncAllProductNotifications } = require("../services/notificationService");
+      await resyncAllProductNotifications();
+    }
+    console.log("[Settings] All keys saved successfully.");
     res.json({ message: "Settings saved successfully" });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error("[Settings] SAVE ERROR:", err.message, err.sqlMessage || "");
+    res.status(500).json({ error: err.sqlMessage || err.message || "Failed to save settings." });
   }
 };
 
@@ -617,3 +769,366 @@ exports.resetPassword = async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 };
+
+// --- RECOVERY PIN CONTROLLERS & LOCKOUT STATE ---
+let failedPinAttempts = 0;
+let pinLockoutUntil = null;
+const resetTokens = new Map();
+
+// Set or Change Recovery PIN
+exports.setRecoveryPin = async (req, res) => {
+  const { currentPassword, recoveryPin, confirmPin } = req.body;
+  console.log("[Auth Log] Set/Change Recovery PIN request received.");
+
+  if (!currentPassword || !recoveryPin || !confirmPin) {
+    return res.status(400).json({ error: "Current password, Recovery PIN, and Confirm Recovery PIN are required" });
+  }
+
+  if (recoveryPin !== confirmPin) {
+    return res.status(400).json({ error: "Recovery PIN and Confirm Recovery PIN do not match" });
+  }
+
+  // Validate Recovery PIN strictly: exactly 6 digits, numbers only
+  if (!/^\d{6}$/.test(recoveryPin)) {
+    return res.status(400).json({ error: "Recovery PIN must be exactly 6 digits (numbers only)" });
+  }
+
+  try {
+    // 1. Verify current admin password
+    const currentPassRes = await query("SELECT setting_value FROM settings WHERE setting_key = 'admin_password'");
+    const defaultHashed = await bcrypt.hash("admin123", 10);
+    const dbPassword = currentPassRes.length > 0 ? currentPassRes[0].setting_value : defaultHashed;
+    const isHashed = dbPassword.startsWith("$2a$") || dbPassword.startsWith("$2b$") || dbPassword.startsWith("$2y$");
+
+    let match = false;
+    if (isHashed) {
+      match = await bcrypt.compare(currentPassword, dbPassword);
+    } else {
+      match = (currentPassword === dbPassword);
+    }
+
+    if (!match) {
+      return res.status(400).json({ error: "Incorrect current admin password" });
+    }
+
+    // 2. Hash Recovery PIN using bcrypt
+    const hashedPin = await bcrypt.hash(recoveryPin, 10);
+
+    // 3. Save to database
+    await query(
+      "INSERT INTO settings (setting_key, setting_value) VALUES ('recovery_pin', ?) ON DUPLICATE KEY UPDATE setting_value = ?",
+      [hashedPin, hashedPin]
+    );
+
+    console.log("[Auth Log] Success: Recovery PIN configured successfully.");
+    res.json({ message: "Recovery PIN saved successfully!", has_recovery_pin: true });
+  } catch (err) {
+    console.error("[Auth Log] Error setting Recovery PIN:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+};
+
+// Verify Recovery PIN (for Forgot Password flow)
+exports.verifyRecoveryPin = async (req, res) => {
+  const { pin } = req.body;
+  console.log("[Auth Log] Verify Recovery PIN request received.");
+
+  // Check 10-minute lockout state first
+  if (pinLockoutUntil) {
+    if (Date.now() < pinLockoutUntil) {
+      const remainingSec = Math.ceil((pinLockoutUntil - Date.now()) / 1000);
+      const remainingMin = Math.ceil(remainingSec / 60);
+      return res.status(429).json({
+        error: `Recovery PIN verification is temporarily locked for 10 minutes. Please try again in ${remainingMin} minute(s).`
+      });
+    } else {
+      // Lockout expired, reset counters
+      pinLockoutUntil = null;
+      failedPinAttempts = 0;
+    }
+  }
+
+  // Check if PIN is configured in DB
+  try {
+    const pinRes = await query("SELECT setting_value FROM settings WHERE setting_key = 'recovery_pin'");
+    if (pinRes.length === 0 || !pinRes[0].setting_value) {
+      return res.status(400).json({ error: "Recovery PIN is not configured. Please contact the administrator." });
+    }
+
+    if (!pin || !/^\d{6}$/.test(pin)) {
+      return res.status(400).json({ error: "Recovery PIN must be exactly 6 digits" });
+    }
+
+    const storedHashedPin = pinRes[0].setting_value;
+    const isHashed = storedHashedPin.startsWith("$2a$") || storedHashedPin.startsWith("$2b$") || storedHashedPin.startsWith("$2y$");
+
+    let match = false;
+    if (isHashed) {
+      match = await bcrypt.compare(pin, storedHashedPin);
+    } else {
+      match = (pin === storedHashedPin);
+    }
+
+    if (!match) {
+      failedPinAttempts += 1;
+      if (failedPinAttempts >= 5) {
+        pinLockoutUntil = Date.now() + 10 * 60 * 1000; // 10 minutes from now
+        return res.status(429).json({
+          error: "Maximum incorrect Recovery PIN attempts reached. Recovery PIN verification is temporarily locked for 10 minutes."
+        });
+      }
+      const attemptsLeft = 5 - failedPinAttempts;
+      return res.status(400).json({
+        error: `Incorrect Recovery PIN. ${attemptsLeft} attempt(s) remaining before temporary lockout.`
+      });
+    }
+
+    // Success: reset failure counter and clear lockout
+    failedPinAttempts = 0;
+    pinLockoutUntil = null;
+
+    // Generate single-use resetToken (valid for 15 minutes)
+    const resetToken = require("crypto").randomBytes(16).toString("hex");
+    resetTokens.set(resetToken, Date.now() + 15 * 60 * 1000);
+
+    console.log("[Auth Log] Success: Recovery PIN verified successfully.");
+    res.json({ success: true, message: "Recovery PIN verified successfully", resetToken });
+  } catch (err) {
+    console.error("[Auth Log] Error verifying Recovery PIN:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+};
+
+// Reset Password using verified Recovery PIN session token
+exports.resetPasswordWithPin = async (req, res) => {
+  const { resetToken, newPassword, confirmPassword } = req.body;
+  console.log("[Auth Log] Reset password with PIN request received.");
+
+  if (!resetToken || !resetTokens.has(resetToken)) {
+    return res.status(400).json({ error: "Invalid or expired password reset session. Please verify Recovery PIN again." });
+  }
+
+  const expiry = resetTokens.get(resetToken);
+  if (Date.now() > expiry) {
+    resetTokens.delete(resetToken);
+    return res.status(400).json({ error: "Password reset session has expired. Please verify Recovery PIN again." });
+  }
+
+  if (!newPassword || !confirmPassword) {
+    return res.status(400).json({ error: "New password and confirm password are required" });
+  }
+
+  if (newPassword !== confirmPassword) {
+    return res.status(400).json({ error: "New password and confirm password do not match" });
+  }
+
+  if (newPassword.trim() === "") {
+    return res.status(400).json({ error: "Password cannot be blank" });
+  }
+
+  try {
+    const hashedNewPassword = await bcrypt.hash(newPassword, 10);
+    await query(
+      "INSERT INTO settings (setting_key, setting_value) VALUES ('admin_password', ?) ON DUPLICATE KEY UPDATE setting_value = ?",
+      [hashedNewPassword, hashedNewPassword]
+    );
+
+    // Invalidate resetToken so it cannot be reused
+    resetTokens.delete(resetToken);
+
+    console.log("[Auth Log] Success: Password reset via Recovery PIN completed successfully.");
+    res.json({ success: true, message: "Password updated successfully. Please log in with your new password." });
+  } catch (err) {
+    console.error("[Auth Log] Error resetting password with PIN:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+};
+
+// Get all activity logs with filters
+exports.getActivityLogs = async (req, res) => {
+  const { startDate, endDate, search } = req.query;
+  let whereClause = "";
+  const params = [];
+
+  if (startDate && endDate) {
+    whereClause = "WHERE created_at BETWEEN ? AND ?";
+    params.push(`${startDate} 00:00:00`, `${endDate} 23:59:59`);
+  }
+
+  if (search && search.trim() !== "") {
+    const searchVal = `%${search.trim()}%`;
+    if (whereClause === "") {
+      whereClause = "WHERE (message LIKE ? OR type LIKE ?)";
+    } else {
+      whereClause += " AND (message LIKE ? OR type LIKE ?)";
+    }
+    params.push(searchVal, searchVal);
+  }
+
+  try {
+    const results = await query(`SELECT * FROM activity_log ${whereClause} ORDER BY created_at DESC`, params);
+    res.json(results);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};
+
+// Helper to generate Code-128 barcode as a base64 PNG data URL
+const generateBarcodeDataUrl = async (text) => {
+  return new Promise((resolve, reject) => {
+    bwipjs.toBuffer(
+      {
+        bcid: "code128",
+        text: text,
+        scale: 3,
+        height: 10,
+        includetext: true,
+        textxalign: "center",
+      },
+      (err, pngBuffer) => {
+        if (err) {
+          reject(err);
+        } else {
+          resolve(`data:image/png;base64,${pngBuffer.toString("base64")}`);
+        }
+      }
+    );
+  });
+};
+
+// GET /api/products/barcode/:barcode
+exports.getProductByBarcode = async (req, res) => {
+  const { barcode } = req.params;
+  try {
+    const results = await query(
+      "SELECT id, serial_no, serial_no AS sku, article_number, brand, type, size, color, purchase_price, selling_price, discount_percent, stock, supplier_name, supplier_name AS supplier, barcode FROM products WHERE barcode = ?",
+      [barcode]
+    );
+    if (results.length === 0) {
+      return res.status(404).json({ error: "Product with this barcode not found." });
+    }
+    res.json(results[0]);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};
+
+// POST /api/barcode/generate/:id
+exports.regenerateBarcode = async (req, res) => {
+  const { id } = req.params;
+  try {
+    const prod = await query("SELECT * FROM products WHERE id = ?", [id]);
+    if (prod.length === 0) {
+      return res.status(404).json({ error: "Product not found." });
+    }
+    // Generate a barcode using ID and timestamp to guarantee absolute uniqueness
+    const newBarcode = `BC-${id}-${Date.now().toString().slice(-4)}`;
+    await query(
+      "UPDATE products SET barcode = ?, barcode_generated_at = NOW() WHERE id = ?",
+      [newBarcode, id]
+    );
+    res.json({ message: "Barcode regenerated successfully", barcode: newBarcode });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};
+
+// POST /api/barcode/print/:id
+exports.printBarcode = async (req, res) => {
+  const { id } = req.params;
+  const { copies = 1 } = req.body;
+  try {
+    const prod = await query("SELECT * FROM products WHERE id = ?", [id]);
+    if (prod.length === 0) {
+      return res.status(404).json({ error: "Product not found." });
+    }
+    const p = prod[0];
+    if (!p.barcode) {
+      return res.status(400).json({ error: "Product does not have a barcode generated." });
+    }
+    const barcodeDataUrl = await generateBarcodeDataUrl(p.barcode);
+    res.json({
+      product: p,
+      barcodeDataUrl,
+      copies
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};
+
+// POST /api/barcode/print-all
+exports.printAllBarcodes = async (req, res) => {
+  const { products } = req.body; // Array of { id, copies }
+  try {
+    const list = products || [];
+    const results = [];
+    for (const item of list) {
+      const prod = await query("SELECT * FROM products WHERE id = ?", [item.id]);
+      if (prod.length > 0) {
+        const p = prod[0];
+        if (p.barcode) {
+          try {
+            const barcodeDataUrl = await generateBarcodeDataUrl(p.barcode);
+            results.push({
+              product: p,
+              barcodeDataUrl,
+              copies: item.copies || 1
+            });
+          } catch (barErr) {
+            console.error(`Error generating barcode for ID ${p.id}:`, barErr);
+          }
+        }
+      }
+    }
+    res.json({ labels: results });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};
+
+// GET /api/barcode/image/:barcode
+exports.getBarcodeImage = async (req, res) => {
+  const { barcode } = req.params;
+  try {
+    bwipjs.toBuffer(
+      {
+        bcid: "code128",
+        text: barcode,
+        scale: 2,
+        height: 8,
+        includetext: false
+      },
+      (err, pngBuffer) => {
+        if (err) {
+          res.status(500).json({ error: err.message });
+        } else {
+          res.set("Content-Type", "image/png");
+          res.send(pngBuffer);
+        }
+      }
+    );
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};
+
+// POST /api/barcode/generate-missing
+exports.generateMissingBarcodes = async (req, res) => {
+  try {
+    const products = await query("SELECT id FROM products WHERE barcode IS NULL OR barcode = ''");
+    let count = 0;
+    for (const prod of products) {
+      const barcode = `BC-${prod.id}-${Date.now().toString().slice(-4)}`;
+      await query(
+        "UPDATE products SET barcode = ?, barcode_generated_at = NOW() WHERE id = ?",
+        [barcode, prod.id]
+      );
+      count++;
+    }
+    res.json({ message: `Successfully generated barcodes for ${count} products.`, count });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};
+

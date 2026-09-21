@@ -1,7 +1,13 @@
 const express = require("express");
 const cors = require("cors");
 
-require("./config/db");
+const db = require("./config/db");
+const runMigration = require("./config/migrate");
+
+// Run migrations on startup
+runMigration()
+  .then(() => console.log("Migrations completed successfully"))
+  .catch(err => console.error("Migrations failed:", err));
 
 const productRoutes = require("./routes/productRoutes");
 const salesRoutes = require("./routes/salesRoutes");
@@ -10,7 +16,8 @@ const expenseRoutes = require("./routes/expenseRoutes");
 const app = express();
 
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: "10mb" }));
+app.use(express.urlencoded({ extended: true, limit: "10mb" }));
 
 app.use("/api", productRoutes);
 app.use("/api", salesRoutes);
