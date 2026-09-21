@@ -19,7 +19,8 @@ import {
   PlusCircle,
   Search,
   User,
-  Barcode
+  Barcode,
+  MessageSquare
 } from "lucide-react";
 import { useSettings } from "../context/SettingsContext";
 
@@ -327,7 +328,7 @@ function Billing() {
     };
   }, []);
 
-  // Lookup article number in-memory from preloaded allProducts
+  // Lookup article number or barcode in-memory from preloaded allProducts
   useEffect(() => {
     if (!searchQuery.trim()) {
       setLoadedProduct(null);
@@ -337,7 +338,9 @@ function Billing() {
 
     const queryLower = searchQuery.trim().toLowerCase();
     const exactMatch = allProducts.find(
-      (p) => p.article_number && p.article_number.toLowerCase() === queryLower
+      (p) =>
+        (p.barcode && p.barcode.toLowerCase() === queryLower) ||
+        (p.article_number && p.article_number.toLowerCase() === queryLower)
     );
 
     if (exactMatch) {
@@ -347,10 +350,12 @@ function Billing() {
       setLoadedProduct(null);
       // Only set error if search query does not match any prefix (or suggestions are empty)
       const matchesPrefix = allProducts.some(
-        (p) => p.article_number && p.article_number.toLowerCase().includes(queryLower)
+        (p) =>
+          (p.barcode && p.barcode.toLowerCase().includes(queryLower)) ||
+          (p.article_number && p.article_number.toLowerCase().includes(queryLower))
       );
       if (!matchesPrefix) {
-        setSearchError("Article Number not found.");
+        setSearchError("Product not found.");
       } else {
         setSearchError("");
       }
@@ -361,7 +366,10 @@ function Billing() {
     if (!searchQuery.trim()) return [];
     const query = searchQuery.toLowerCase().trim();
     return allProducts.filter((p) =>
-      p && p.article_number && p.article_number.toLowerCase().includes(query)
+      p && (
+        (p.barcode && p.barcode.toLowerCase().includes(query)) ||
+        (p.article_number && p.article_number.toLowerCase().includes(query))
+      )
     );
   };
 
@@ -558,6 +566,65 @@ function Billing() {
 
   const handlePrint = () => {
     window.print();
+  };
+
+  const handleSendWhatsApp = () => {
+    if (!invoiceData) return;
+
+    const rawPhone = invoiceData.customer_phone || "";
+    const cleanPhone = rawPhone.replace(/\D/g, "");
+
+    if (!cleanPhone) {
+      alert("Customer mobile number is required to send the bill on WhatsApp.");
+      return;
+    }
+
+    let fullPhone = cleanPhone;
+    if (cleanPhone.length === 10) {
+      if (!/^[6-9]\d{9}$/.test(cleanPhone)) {
+        alert("Enter a valid 10-digit mobile number to send WhatsApp bill.");
+        return;
+      }
+      fullPhone = `91${cleanPhone}`;
+    } else if (cleanPhone.length === 12 && cleanPhone.startsWith("91")) {
+      if (!/^91[6-9]\d{9}$/.test(cleanPhone)) {
+        alert("Enter a valid 10-digit mobile number to send WhatsApp bill.");
+        return;
+      }
+    } else {
+      alert("Enter a valid 10-digit mobile number to send WhatsApp bill.");
+      return;
+    }
+
+    const customerName =
+      invoiceData.customer_name && invoiceData.customer_name !== "Walk-in Customer"
+        ? invoiceData.customer_name
+        : "Customer";
+
+    const invoiceNo = invoiceData.bill_no || "";
+    const dateStr = invoiceData.date
+      ? new Date(invoiceData.date).toLocaleDateString("en-IN", {
+          day: "2-digit",
+          month: "2-digit",
+          year: "numeric"
+        })
+      : new Date().toLocaleDateString("en-IN");
+    const totalAmt = invoiceData.total ? invoiceData.total.toFixed(2) : "0.00";
+
+    const messageText = `Hello ${customerName},
+
+Thank you for your purchase!
+
+Invoice: ${invoiceNo}
+Date: ${dateStr}
+Total Amount: ₹${totalAmt}
+
+Thank you for shopping with us.`;
+
+    const encodedMessage = encodeURIComponent(messageText);
+    const whatsappUrl = `https://wa.me/${fullPhone}?text=${encodedMessage}`;
+
+    window.open(whatsappUrl, "_blank");
   };
 
   const handleCloseInvoice = () => {
@@ -1178,17 +1245,36 @@ function Billing() {
               </div>{/* end relative z-1 content */}
             </div>
 
-            {/* Print Options */}
-            <div className="mt-6 flex gap-3 border-t border-brand-border pt-4 no-print">
+            {/* Print & Share Options */}
+            <div className="mt-6 flex flex-wrap gap-3 border-t border-brand-border pt-4 no-print">
               <button
                 onClick={handleCloseInvoice}
-                className="flex-1 rounded-xl border border-brand-border bg-white py-3.5 text-[15px] font-bold text-brand-subtext hover:bg-slate-50 text-center"
+                className="flex-1 rounded-xl border border-brand-border bg-white py-3.5 text-[15px] font-bold text-brand-subtext hover:bg-slate-50 text-center min-w-[120px]"
               >
                 Close Receipt
               </button>
+              {invoiceData.customer_phone && invoiceData.customer_phone.trim() !== "" ? (
+                <button
+                  onClick={handleSendWhatsApp}
+                  className="flex-1 flex items-center justify-center gap-1.5 rounded-xl bg-emerald-600 py-3.5 text-[15px] font-bold text-white shadow-md shadow-emerald-600/20 hover:bg-emerald-700 text-center min-w-[150px]"
+                >
+                  <MessageSquare className="h-5 w-5" />
+                  Send on WhatsApp
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  disabled
+                  title="Customer mobile number is required to send the bill on WhatsApp."
+                  className="flex-1 flex items-center justify-center gap-1.5 rounded-xl bg-slate-100 py-3.5 text-[15px] font-bold text-slate-400 border border-slate-200 cursor-not-allowed text-center min-w-[150px]"
+                >
+                  <MessageSquare className="h-5 w-5 text-slate-400" />
+                  Send on WhatsApp
+                </button>
+              )}
               <button
                 onClick={handlePrint}
-                className="flex-1 flex items-center justify-center gap-1.5 rounded-xl bg-brand-accent py-3.5 text-[15px] font-bold text-white shadow-md shadow-brand-accent/20 hover:bg-blue-600 text-center"
+                className="flex-1 flex items-center justify-center gap-1.5 rounded-xl bg-brand-accent py-3.5 text-[15px] font-bold text-white shadow-md shadow-brand-accent/20 hover:bg-blue-600 text-center min-w-[130px]"
               >
                 <Printer className="h-5 w-5" />
                 Print (PDF)

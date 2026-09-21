@@ -1682,6 +1682,264 @@ exports.getPurchaseHistory = async (req, res) => {
   }
 };
 
+// Internal helper for purchase export data
+const retrievePurchaseReportData = async (supplier, brand, type, articleNumber, startDate, endDate) => {
+  const shopNameRes = await query("SELECT setting_value FROM settings WHERE setting_key = 'shop_name'");
+  const shopName = shopNameRes[0]?.setting_value || "My Slipper Shop";
+
+  let sql = "SELECT * FROM purchase_history WHERE 1=1";
+  const params = [];
+
+  if (supplier && supplier.trim() !== "") {
+    sql += " AND supplier_name = ? ";
+    params.push(supplier.trim());
+  }
+  if (brand && brand.trim() !== "") {
+    sql += " AND brand = ? ";
+    params.push(brand.trim());
+  }
+  if (type && type.trim() !== "") {
+    sql += " AND type = ? ";
+    params.push(type.trim());
+  }
+  if (articleNumber && articleNumber.trim() !== "") {
+    sql += " AND article_number = ? ";
+    params.push(articleNumber.trim());
+  }
+  if (startDate && endDate) {
+    sql += " AND purchase_date BETWEEN ? AND ? ";
+    params.push(startDate + " 00:00:00", endDate + " 23:59:59");
+  }
+
+  sql += " ORDER BY purchase_date DESC ";
+
+  const records = await query(sql, params);
+
+  let totalQty = 0;
+  let totalValue = 0;
+  records.forEach(r => {
+    totalQty += Number(r.quantity || 0);
+    totalValue += Number(r.total_value || 0);
+  });
+
+  return {
+    shopName,
+    records,
+    summary: {
+      totalRecords: records.length,
+      totalQty,
+      totalValue
+    },
+    filters: {
+      supplier: supplier || "",
+      brand: brand || "",
+      type: type || "",
+      articleNumber: articleNumber || "",
+      startDate: startDate || "",
+      endDate: endDate || ""
+    }
+  };
+};
+
+exports.getPurchaseExportData = async (req, res) => {
+  const { supplier, brand, type, article_number, articleNumber, startDate, endDate } = req.query;
+  const articleVal = article_number || articleNumber;
+  try {
+    const data = await retrievePurchaseReportData(supplier, brand, type, articleVal, startDate, endDate);
+    res.json(data);
+  } catch (err) {
+    console.error("getPurchaseExportData error:", err);
+    res.status(500).json({ error: err.message });
+  }
+};
+
+exports.getPurchaseExportExcel = async (req, res) => {
+  const { supplier, brand, type, article_number, articleNumber, startDate, endDate } = req.query;
+  const articleVal = article_number || articleNumber;
+  const ExcelJS = require("exceljs");
+
+  try {
+    const data = await retrievePurchaseReportData(supplier, brand, type, articleVal, startDate, endDate);
+
+    if (!data.records || data.records.length === 0) {
+      return res.status(400).json({ error: "No records available for the selected filters." });
+    }
+
+    const workbook = new ExcelJS.Workbook();
+    const worksheet = workbook.addWorksheet("Purchase History");
+
+    // Title info block
+    worksheet.getCell("A1").value = data.shopName;
+    worksheet.getCell("A1").font = { name: "Arial", size: 16, bold: true };
+
+    worksheet.getCell("A2").value = "Purchase History Report";
+    worksheet.getCell("A2").font = { name: "Arial", size: 12, bold: true };
+
+    const dateRangeStr = `Period: ${startDate || "Lifetime"} to ${endDate || "Present"}`;
+    worksheet.getCell("A3").value = dateRangeStr;
+    worksheet.getCell("A3").font = { name: "Arial", size: 10, italic: true };
+
+    const generatedStr = `Generated Date/Time: ${new Date().toLocaleString()}`;
+    worksheet.getCell("A4").value = generatedStr;
+    worksheet.getCell("A4").font = { name: "Arial", size: 10, italic: true };
+
+    const activeFilters = [];
+    if (supplier) activeFilters.push(`Supplier: "${supplier}"`);
+    if (brand) activeFilters.push(`Brand: "${brand}"`);
+    if (type) activeFilters.push(`Type: "${type}"`);
+    if (articleVal) activeFilters.push(`Article: "${articleVal}"`);
+    const appliedFiltersStr = `Applied Filters: ${activeFilters.length > 0 ? activeFilters.join(", ") : "None"}`;
+    worksheet.getCell("A5").value = appliedFiltersStr;
+    worksheet.getCell("A5").font = { name: "Arial", size: 10, italic: true };
+
+    // Summary block
+    worksheet.getCell("A7").value = "SUMMARY STATISTICS";
+    worksheet.getCell("A7").font = { name: "Arial", size: 11, bold: true };
+
+    const stats = [
+      ["Total Purchase Records", data.summary.totalRecords],
+      ["Total Quantity Purchased", data.summary.totalQty],
+      ["Total Purchase Value", data.summary.totalValue]
+    ];
+
+    stats.forEach((stat, idx) => {
+      const rowNum = 8 + idx;
+      const cellLabel = worksheet.getCell(`A${rowNum}`);
+      const cellVal = worksheet.getCell(`B${rowNum}`);
+
+      cellLabel.value = stat[0];
+      cellLabel.font = { name: "Arial", bold: true };
+      cellLabel.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFF1F5F9" } };
+      cellLabel.border = { top: { style: "thin" }, left: { style: "thin" }, bottom: { style: "thin" }, right: { style: "thin" } };
+
+      cellVal.value = stat[1];
+      cellVal.border = { top: { style: "thin" }, left: { style: "thin" }, bottom: { style: "thin" }, right: { style: "thin" } };
+      if (idx === 2) {
+        cellVal.numFmt = '"₹"#,##0.00';
+        cellVal.font = { name: "Arial", bold: true };
+      } else {
+        cellVal.numFmt = "#,##0";
+        cellVal.font = { name: "Arial", bold: true };
+      }
+    });
+
+    const headerRowIndex = 12;
+    const columns = [
+      { header: "Purchase Date", key: "purchase_date" },
+      { header: "Reference No", key: "purchase_ref_no" },
+      { header: "Supplier Name", key: "supplier_name" },
+      { header: "Article No", key: "article_number" },
+      { header: "Brand", key: "brand" },
+      { header: "Product Type", key: "type" },
+      { header: "Size", key: "size" },
+      { header: "Color", key: "color" },
+      { header: "Quantity", key: "quantity" },
+      { header: "Purchase Price", key: "purchase_price" },
+      { header: "Total Value", key: "total_value" }
+    ];
+
+    const headerRow = worksheet.getRow(headerRowIndex);
+    columns.forEach((col, idx) => {
+      const cell = headerRow.getCell(idx + 1);
+      cell.value = col.header;
+      cell.font = { name: "Arial", size: 10, bold: true, color: { argb: "FFFFFFFF" } };
+      cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF1E293B" } };
+      cell.alignment = { horizontal: "center", vertical: "middle" };
+      cell.border = { top: { style: "medium" }, left: { style: "thin" }, bottom: { style: "medium" }, right: { style: "thin" } };
+    });
+    headerRow.height = 24;
+
+    worksheet.views = [{ state: "frozen", ySplit: headerRowIndex }];
+
+    const startDataRow = headerRowIndex + 1;
+    data.records.forEach((rec, recIdx) => {
+      const rowNum = startDataRow + recIdx;
+      const row = worksheet.getRow(rowNum);
+
+      const dObj = rec.purchase_date ? new Date(rec.purchase_date) : null;
+      row.getCell(1).value = dObj ? `${dObj.toLocaleDateString("en-IN")} ${dObj.toLocaleTimeString("en-IN", { hour: '2-digit', minute: '2-digit' })}` : "-";
+      row.getCell(2).value = rec.purchase_ref_no || "-";
+      row.getCell(3).value = rec.supplier_name || "-";
+      row.getCell(4).value = rec.article_number || "-";
+      row.getCell(5).value = rec.brand || "-";
+      row.getCell(6).value = rec.type || "-";
+      row.getCell(7).value = rec.size !== undefined && rec.size !== null ? String(rec.size) : "-";
+      row.getCell(8).value = rec.color || "-";
+      row.getCell(9).value = Number(rec.quantity || 0);
+      row.getCell(10).value = Number(rec.purchase_price || 0);
+      row.getCell(11).value = Number(rec.total_value || 0);
+
+      row.getCell(9).numFmt = "#,##0";
+      row.getCell(10).numFmt = '"₹"#,##0.00';
+      row.getCell(11).numFmt = '"₹"#,##0.00';
+
+      row.getCell(1).alignment = { horizontal: "center" };
+      row.getCell(7).alignment = { horizontal: "center" };
+      row.getCell(8).alignment = { horizontal: "center" };
+      row.getCell(9).alignment = { horizontal: "center" };
+
+      columns.forEach((col, idx) => {
+        const cell = row.getCell(idx + 1);
+        cell.font = { name: "Arial", size: 10 };
+        cell.border = { top: { style: "thin" }, left: { style: "thin" }, bottom: { style: "thin" }, right: { style: "thin" } };
+      });
+      row.height = 20;
+    });
+
+    // Total row
+    const endDataRow = startDataRow + data.records.length - 1;
+    const totalRowIndex = endDataRow + 1;
+    const totalRow = worksheet.getRow(totalRowIndex);
+
+    totalRow.getCell(1).value = "Total";
+    totalRow.getCell(1).font = { name: "Arial", size: 10, bold: true };
+
+    columns.forEach((col, idx) => {
+      const cell = totalRow.getCell(idx + 1);
+      cell.border = { top: { style: "thin" }, left: { style: "thin" }, bottom: { style: "double" }, right: { style: "thin" } };
+      cell.font = { name: "Arial", size: 10, bold: true };
+    });
+
+    totalRow.getCell(9).value = { formula: `SUM(I${startDataRow}:I${endDataRow})` };
+    totalRow.getCell(9).numFmt = "#,##0";
+    totalRow.getCell(9).alignment = { horizontal: "center" };
+
+    totalRow.getCell(11).value = { formula: `SUM(K${startDataRow}:K${endDataRow})` };
+    totalRow.getCell(11).numFmt = '"₹"#,##0.00';
+    totalRow.height = 22;
+
+    // Auto-fit column widths
+    worksheet.columns.forEach(column => {
+      let maxLen = 0;
+      column.eachCell({ includeEmpty: true }, cell => {
+        if (cell.row < headerRowIndex) return;
+        let val = "";
+        if (cell.value && typeof cell.value === "object" && cell.value.formula) {
+          val = "₹99,999.00";
+        } else if (cell.value !== null && cell.value !== undefined) {
+          val = String(cell.value);
+        }
+        if (val.length > maxLen) {
+          maxLen = val.length;
+        }
+      });
+      column.width = Math.max(maxLen + 4, 12);
+    });
+
+    res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+    res.setHeader("Content-Disposition", `attachment; filename=Purchase_History_${new Date().toISOString().slice(0, 10)}.xlsx`);
+
+    await workbook.xlsx.write(res);
+    res.end();
+  } catch (err) {
+    console.error("Purchase getPurchaseExportExcel error:", err);
+    if (!res.headersSent) {
+      res.setHeader("Content-Type", "application/json");
+      res.status(500).json({ error: err.message });
+    }
+  }
+};
+
 // ============================================================
 // CUSTOMER HISTORY EXPORTS (reuse Sales History pattern)
 // ============================================================

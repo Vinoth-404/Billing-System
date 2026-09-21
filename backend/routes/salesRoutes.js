@@ -17,6 +17,8 @@ router.get("/customers/export-data", salesController.getCustomerExportData);
 router.get("/customers/export-excel", salesController.getCustomerExportExcel);
 router.get("/customers", salesController.getCustomerHistoryList);
 router.get("/customers/:phone/history", salesController.getCustomerPurchaseHistory);
+router.get("/purchases/export-data", salesController.getPurchaseExportData);
+router.get("/purchases/export-excel", salesController.getPurchaseExportExcel);
 router.get("/purchases", salesController.getPurchaseHistory);
 
 module.exports = router;

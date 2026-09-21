@@ -322,16 +322,16 @@ exports.addOrUpdateStock = async (req, res) => {
   }
 };
 
-// Get single product details by Article Number
+// Get single product details by Article Number or Barcode Number
 exports.getProductByArticleNumber = async (req, res) => {
   const { articleNumber } = req.params;
   try {
     const results = await query(
-      "SELECT id, article_number, brand, type, size, color, purchase_price, selling_price, stock, supplier_name AS supplier, discount_percent, barcode FROM products WHERE article_number = ?",
-      [articleNumber]
+      "SELECT id, article_number, brand, type, size, color, purchase_price, selling_price, stock, supplier_name AS supplier, discount_percent, barcode FROM products WHERE article_number = ? OR barcode = ?",
+      [articleNumber, articleNumber]
     );
     if (results.length === 0) {
-      return res.status(404).json({ error: "Article Number not found." });
+      return res.status(404).json({ error: "Product not found." });
     }
     const product = results[0];
     if (!product.barcode) {
@@ -1009,11 +1009,11 @@ exports.getProductByBarcode = async (req, res) => {
   const { barcode } = req.params;
   try {
     const results = await query(
-      "SELECT id, serial_no, serial_no AS sku, article_number, brand, type, size, color, purchase_price, selling_price, discount_percent, stock, supplier_name, supplier_name AS supplier, barcode FROM products WHERE barcode = ?",
-      [barcode]
+      "SELECT id, serial_no, serial_no AS sku, article_number, brand, type, size, color, purchase_price, selling_price, discount_percent, stock, supplier_name, supplier_name AS supplier, barcode FROM products WHERE barcode = ? OR article_number = ?",
+      [barcode, barcode]
     );
     if (results.length === 0) {
-      return res.status(404).json({ error: "Product with this barcode not found." });
+      return res.status(404).json({ error: "Product not found." });
     }
     res.json(results[0]);
   } catch (err) {

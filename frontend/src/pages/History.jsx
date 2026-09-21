@@ -454,7 +454,24 @@ function History() {
         });
       }
 
-      doc.save(`SlipperShop_${activeTab}_Report_${new Date().toISOString().slice(0, 10)}.pdf`);
+      // Add page numbering to doc
+      const totalPages = doc.internal.getNumberOfPages();
+      for (let i = 1; i <= totalPages; i++) {
+        doc.setPage(i);
+        doc.setFontSize(8);
+        doc.setFont("Helvetica", "normal");
+        doc.text(
+          `Page ${i} of ${totalPages}`,
+          doc.internal.pageSize.width - 25,
+          doc.internal.pageSize.height - 10
+        );
+      }
+
+      let pdfFilename = `Sales_History_${new Date().toISOString().slice(0, 10)}.pdf`;
+      if (activeTab === "reports") pdfFilename = `Supplier_Report_${new Date().toISOString().slice(0, 10)}.pdf`;
+      if (activeTab === "activity") pdfFilename = `Activity_Log_${new Date().toISOString().slice(0, 10)}.pdf`;
+
+      doc.save(pdfFilename);
 
     } catch (err) {
       console.error("Export PDF error:", err);

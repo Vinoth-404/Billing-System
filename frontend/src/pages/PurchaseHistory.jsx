@@ -100,114 +100,191 @@ function PurchaseHistory() {
     setEndDate("");
   };
 
-  const exportExcel = () => {
-    if (records.length === 0) {
-      alert("No purchase records to export.");
-      return;
+  const exportExcel = async () => {
+    try {
+      const params = new URLSearchParams();
+      if (supplier) params.append("supplier", supplier);
+      if (brand) params.append("brand", brand);
+      if (type) params.append("type", type);
+      if (articleNumber) params.append("articleNumber", articleNumber);
+      if (startDate) params.append("startDate", startDate);
+      if (endDate) params.append("endDate", endDate);
+      const qs = params.toString() ? `?${params.toString()}` : "";
+
+      const response = await axios.get(`${API}/api/purchases/export-excel${qs}`, {
+        responseType: "blob"
+      });
+
+      if (response.headers["content-type"]?.includes("application/json")) {
+        const text = await response.data.text();
+        const errObj = JSON.parse(text);
+        alert(errObj.error || "Export failed.");
+        return;
+      }
+
+      const blob = new Blob([response.data], { type: response.headers["content-type"] });
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      let filename = `Purchase_History_${new Date().toISOString().slice(0, 10)}.xlsx`;
+      const disposition = response.headers["content-disposition"];
+      if (disposition && disposition.indexOf("attachment") !== -1) {
+        const fnMatch = /filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/.exec(disposition);
+        if (fnMatch?.[1]) filename = fnMatch[1].replace(/['"]/g, "");
+      }
+      link.setAttribute("download", filename);
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error("Purchase Export Excel error:", err);
+      if (err.response?.data instanceof Blob) {
+        try {
+          const text = await err.response.data.text();
+          const errObj = JSON.parse(text);
+          alert(errObj.error || "No purchase records to export.");
+        } catch {
+          alert("Failed to export Excel report.");
+        }
+      } else {
+        alert(err.response?.data?.error || "No purchase records to export.");
+      }
     }
-
-    const headers = [
-      "Purchase Date",
-      "Reference No",
-      "Supplier Name",
-      "Article No",
-      "Brand",
-      "Product Type",
-      "Size",
-      "Color",
-      "Quantity Purchased",
-      "Purchase Price (INR)",
-      "Total Purchase Value (INR)"
-    ];
-
-    const rows = records.map(r => {
-      const d = new Date(r.purchase_date);
-      return [
-        `"${d.toLocaleDateString("en-IN")} ${d.toLocaleTimeString("en-IN", { hour: '2-digit', minute: '2-digit' })}"`,
-        `"${r.purchase_ref_no || ""}"`,
-        `"${(r.supplier_name || "").replace(/"/g, '""')}"`,
-        `"${r.article_number || ""}"`,
-        `"${(r.brand || "").replace(/"/g, '""')}"`,
-        `"${(r.type || "").replace(/"/g, '""')}"`,
-        `"${r.size || ""}"`,
-        `"${(r.color || "").replace(/"/g, '""')}"`,
-        r.quantity,
-        Number(r.purchase_price || 0).toFixed(2),
-        Number(r.total_value || 0).toFixed(2)
-      ];
-    });
-
-    const csvContent = "\uFEFF" + [headers.join(","), ...rows.map(e => e.join(","))].join("\n");
-    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.setAttribute("download", `Purchase_History_${new Date().toISOString().slice(0, 10)}.csv`);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
   };
 
-  const exportPDF = () => {
-    if (records.length === 0) {
-      alert("No purchase records to export.");
-      return;
-    }
+  const exportPDF = async () => {
+    try {
+      const params = new URLSearchParams();
+      if (supplier) params.append("supplier", supplier);
+      if (brand) params.append("brand", brand);
+      if (type) params.append("type", type);
+      if (articleNumber) params.append("articleNumber", articleNumber);
+      if (startDate) params.append("startDate", startDate);
+      if (endDate) params.append("endDate", endDate);
+      const qs = params.toString() ? `?${params.toString()}` : "";
 
-    const doc = new jsPDF({ orientation: "landscape" });
-    const shopTitle = settings.shop_name || "My Slipper Shop";
+      const response = await axios.get(`${API}/api/purchases/export-data${qs}`);
+      const data = response.data;
 
-    doc.setFont("Helvetica", "bold");
-    doc.setFontSize(18);
-    doc.text(shopTitle, 14, 15);
+      if (!data.records || data.records.length === 0) {
+        alert("No purchase records to export.");
+        return;
+      }
 
-    doc.setFontSize(12);
-    doc.text("Purchase History / Restock Audit Report", 14, 22);
+      const doc = new jsPDF({ orientation: "landscape" });
+      const shopTitle = data.shopName || settings.shop_name || "My Slipper Shop";
 
-    doc.setFont("Helvetica", "normal");
-    doc.setFontSize(9);
-    doc.text(`Period: ${startDate || "Lifetime"} to ${endDate || "Present"}`, 14, 28);
-    doc.text(`Generated Date: ${new Date().toLocaleString("en-IN")}`, 14, 33);
-    
-    let filterStr = "";
-    if (supplier) filterStr += `Supplier: ${supplier} `;
-    if (brand) filterStr += `Brand: ${brand} `;
-    if (type) filterStr += `Type: ${type} `;
-    if (articleNumber) filterStr += `Article: ${articleNumber}`;
-    if (filterStr) {
-      doc.text(`Active Filters: ${filterStr}`, 14, 38);
-    }
+      doc.setFont("Helvetica", "bold");
+      doc.setFontSize(18);
+      doc.text(shopTitle, 14, 15);
 
-    const startY = filterStr ? 44 : 39;
+      doc.setFontSize(12);
+      doc.text("Purchase History Report", 14, 22);
 
-    const tableHeaders = [["Purchase Date", "Ref No", "Supplier Name", "Article No", "Brand", "Type", "Size / Color", "Qty", "Cost Price", "Total Value (₹)"]];
-    const tableData = records.map(r => {
-      const d = new Date(r.purchase_date);
-      return [
-        `${d.toLocaleDateString("en-IN")} ${d.toLocaleTimeString("en-IN", { hour: '2-digit', minute: '2-digit' })}`,
-        r.purchase_ref_no,
-        r.supplier_name,
-        r.article_number,
-        r.brand,
-        r.type,
-        `S-${r.size} / ${r.color}`,
-        `${r.quantity} pairs`,
-        `₹${Number(r.purchase_price || 0).toFixed(2)}`,
-        `₹${Number(r.total_value || 0).toFixed(2)}`
+      doc.setFont("Helvetica", "normal");
+      doc.setFontSize(9);
+      doc.text(`Period: ${startDate || "Lifetime"} to ${endDate || "Present"}`, 14, 28);
+      doc.text(`Generated Date: ${new Date().toLocaleString("en-IN")}`, 14, 33);
+      
+      const activeFilters = [];
+      if (supplier) activeFilters.push(`Supplier: "${supplier}"`);
+      if (brand) activeFilters.push(`Brand: "${brand}"`);
+      if (type) activeFilters.push(`Type: "${type}"`);
+      if (articleNumber) activeFilters.push(`Article: "${articleNumber}"`);
+      if (activeFilters.length > 0) {
+        doc.text(`Applied Filters: ${activeFilters.join(", ")}`, 14, 38);
+      }
+
+      let yPos = activeFilters.length > 0 ? 44 : 39;
+
+      doc.setFont("Helvetica", "bold");
+      doc.setFontSize(10);
+      doc.text("SUMMARY STATISTICS:", 14, yPos);
+      yPos += 5;
+
+      const summaryData = [
+        [
+          `Total Purchase Records: ${data.summary.totalRecords}`,
+          `Total Quantity Purchased: ${data.summary.totalQty}`,
+          `Total Purchase Value: INR ${Number(data.summary.totalValue).toFixed(2)}`
+        ]
       ];
-    });
 
-    autoTable(doc, {
-      startY,
-      head: tableHeaders,
-      body: tableData,
-      theme: "striped",
-      headStyles: { fillColor: [33, 150, 243], textColor: 255, fontStyle: "bold" },
-      styles: { fontSize: 8.5, cellPadding: 3 }
-    });
+      autoTable(doc, {
+        startY: yPos,
+        body: summaryData,
+        theme: "grid",
+        styles: { fontSize: 8.5, fontStyle: "bold", cellPadding: 2.5 },
+        columnStyles: { 0: { cellWidth: 80 }, 1: { cellWidth: 80 }, 2: { cellWidth: 100 } }
+      });
 
-    doc.save(`Purchase_History_${new Date().toISOString().slice(0, 10)}.pdf`);
+      yPos = doc.lastAutoTable.finalY + 8;
+
+      doc.setFont("Helvetica", "bold");
+      doc.setFontSize(10);
+      doc.text("DETAILED PURCHASE RECORDS:", 14, yPos);
+      yPos += 4;
+
+      const tableHeaders = [
+        ["Purchase Date", "Ref No", "Supplier Name", "Article No", "Brand", "Product Type", "Size", "Color", "Quantity", "Purchase Price (Rs.)", "Total Value (Rs.)"]
+      ];
+      
+      const tableData = data.records.map(r => {
+        const d = new Date(r.purchase_date);
+        return [
+          `${d.toLocaleDateString("en-IN")} ${d.toLocaleTimeString("en-IN", { hour: '2-digit', minute: '2-digit' })}`,
+          r.purchase_ref_no || "-",
+          r.supplier_name || "-",
+          r.article_number || "-",
+          r.brand || "-",
+          r.type || "-",
+          r.size !== undefined && r.size !== null ? String(r.size) : "-",
+          r.color || "-",
+          r.quantity,
+          `Rs.${Number(r.purchase_price || 0).toFixed(2)}`,
+          `Rs.${Number(r.total_value || 0).toFixed(2)}`
+        ];
+      });
+
+      autoTable(doc, {
+        startY: yPos,
+        head: tableHeaders,
+        body: tableData,
+        theme: "striped",
+        headStyles: { fillColor: [30, 41, 59], textColor: 255, fontStyle: "bold", fontSize: 8 },
+        bodyStyles: { fontSize: 7.5 },
+        columnStyles: {
+          0: { cellWidth: 28, halign: "center" },
+          1: { cellWidth: 24 },
+          2: { cellWidth: 32 },
+          3: { cellWidth: 24 },
+          4: { cellWidth: 24 },
+          5: { cellWidth: 24 },
+          6: { cellWidth: 12, halign: "center" },
+          7: { cellWidth: 20, halign: "center" },
+          8: { cellWidth: 16, halign: "center" },
+          9: { cellWidth: 28, halign: "right" },
+          10: { cellWidth: 28, halign: "right" }
+        },
+        didDrawPage: (dataArg) => {
+          const totalPages = doc.internal.getNumberOfPages();
+          const pageCurrent = dataArg.pageNumber;
+          doc.setFontSize(8);
+          doc.setFont("Helvetica", "normal");
+          doc.text(
+            `Page ${pageCurrent} of ${totalPages}`,
+            doc.internal.pageSize.width - 25,
+            doc.internal.pageSize.height - 10
+          );
+        }
+      });
+
+      doc.save(`Purchase_History_${new Date().toISOString().slice(0, 10)}.pdf`);
+    } catch (err) {
+      console.error("Export PDF error:", err);
+      alert(err.response?.data?.error || "Failed to generate PDF report.");
+    }
   };
 
   return (

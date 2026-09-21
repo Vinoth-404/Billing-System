@@ -3,6 +3,8 @@ const router = express.Router();
 const expenseController = require("../controllers/expenseController");
 
 // Expense endpoints
+router.get("/expenses/export-excel", expenseController.getExportExcel);
+router.get("/expenses/export-data", expenseController.getExportData);
 router.get("/expenses", expenseController.getExpenses);
 router.post("/expenses", expenseController.createExpense);
 router.put("/expenses/:id", expenseController.updateExpense);

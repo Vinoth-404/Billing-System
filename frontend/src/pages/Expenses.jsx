@@ -1,5 +1,7 @@
 import { useState, useEffect } from "react";
 import axios from "axios";
+import { jsPDF } from "jspdf";
+import autoTable from "jspdf-autotable";
 const API = import.meta.env.VITE_API_URL;
 import {
   Plus,
@@ -13,7 +15,9 @@ import {
   DollarSign,
   Edit3,
   Trash2,
-  Receipt
+  Receipt,
+  FileSpreadsheet,
+  FileText
 } from "lucide-react";
 
 function Expenses() {
@@ -110,6 +114,179 @@ function Expenses() {
       setTimeout(() => {
         fetchExpenses();
       }, 0);
+    }
+  };
+
+  const handleExportExcel = async () => {
+    setLoading(true);
+    try {
+      const params = new URLSearchParams();
+      if (selectedCategory) params.append("category", selectedCategory);
+      if (startDate) params.append("startDate", startDate);
+      if (endDate) params.append("endDate", endDate);
+      if (searchQuery.trim()) params.append("search", searchQuery.trim());
+      const qs = params.toString() ? `?${params.toString()}` : "";
+
+      const response = await axios.get(`${API}/api/expenses/export-excel${qs}`, {
+        responseType: "blob"
+      });
+
+      if (response.headers["content-type"]?.includes("application/json")) {
+        const text = await response.data.text();
+        const errObj = JSON.parse(text);
+        alert(errObj.error || "Export failed.");
+        return;
+      }
+
+      const blob = new Blob([response.data], { type: response.headers["content-type"] });
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      let filename = `Expenses_${new Date().toISOString().slice(0, 10)}.xlsx`;
+      const disposition = response.headers["content-disposition"];
+      if (disposition && disposition.indexOf("attachment") !== -1) {
+        const fnMatch = /filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/.exec(disposition);
+        if (fnMatch?.[1]) filename = fnMatch[1].replace(/['"]/g, "");
+      }
+      link.setAttribute("download", filename);
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error("Export Excel error:", err);
+      if (err.response?.data instanceof Blob) {
+        try {
+          const text = await err.response.data.text();
+          const errObj = JSON.parse(text);
+          alert(errObj.error || "No records available for the selected filters.");
+        } catch {
+          alert("Failed to export Excel report.");
+        }
+      } else {
+        alert(err.response?.data?.error || "No records available for the selected filters.");
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleExportPDF = async () => {
+    setLoading(true);
+    try {
+      const params = new URLSearchParams();
+      if (selectedCategory) params.append("category", selectedCategory);
+      if (startDate) params.append("startDate", startDate);
+      if (endDate) params.append("endDate", endDate);
+      if (searchQuery.trim()) params.append("search", searchQuery.trim());
+      const qs = params.toString() ? `?${params.toString()}` : "";
+
+      const response = await axios.get(`${API}/api/expenses/export-data${qs}`);
+      const data = response.data;
+
+      if (!data.records || data.records.length === 0) {
+        alert("No records available for the selected filters.");
+        return;
+      }
+
+      const doc = new jsPDF({ orientation: "portrait" });
+
+      doc.setFont("Helvetica", "bold");
+      doc.setFontSize(18);
+      doc.text(data.shopName || "My Slipper Shop", 14, 15);
+
+      doc.setFontSize(12);
+      doc.text("Expenses Report", 14, 22);
+
+      doc.setFont("Helvetica", "normal");
+      doc.setFontSize(9);
+      doc.text(`Period: ${startDate || "Lifetime"} to ${endDate || "Present"}`, 14, 28);
+      doc.text(`Generated Date: ${new Date().toLocaleString()}`, 14, 33);
+      
+      const activeFilters = [];
+      if (selectedCategory) activeFilters.push(`Category: "${selectedCategory}"`);
+      if (searchQuery.trim()) activeFilters.push(`Search: "${searchQuery.trim()}"`);
+      if (activeFilters.length > 0) {
+        doc.text(`Applied Filters: ${activeFilters.join(", ")}`, 14, 38);
+      }
+
+      let yPos = activeFilters.length > 0 ? 44 : 39;
+
+      doc.setFont("Helvetica", "bold");
+      doc.setFontSize(10);
+      doc.text("SUMMARY STATISTICS:", 14, yPos);
+      yPos += 5;
+
+      const summaryData = [
+        [
+          `Total Expense Records: ${data.summary.totalRecords}`,
+          `Total Expense Amount: INR ${Number(data.summary.totalAmount).toFixed(2)}`
+        ]
+      ];
+
+      autoTable(doc, {
+        startY: yPos,
+        body: summaryData,
+        theme: "grid",
+        styles: { fontSize: 8.5, fontStyle: "bold", cellPadding: 2.5 },
+        columnStyles: { 0: { cellWidth: 90 }, 1: { cellWidth: 90 } }
+      });
+
+      yPos = doc.lastAutoTable.finalY + 8;
+
+      doc.setFont("Helvetica", "bold");
+      doc.setFontSize(10);
+      doc.text("DETAILED EXPENSE RECORDS:", 14, yPos);
+      yPos += 4;
+
+      const tableHeaders = [
+        ["Expense Date", "Expense Name", "Category", "Amount (Rs.)", "Description / Notes"]
+      ];
+
+      const tableRows = data.records.map(row => {
+        const dObj = row.expense_date ? new Date(row.expense_date) : null;
+        return [
+          dObj ? dObj.toLocaleDateString("en-IN") : "-",
+          row.expense_name || "-",
+          row.category || "-",
+          `Rs.${Number(row.amount || 0).toFixed(2)}`,
+          row.description || "-"
+        ];
+      });
+
+      autoTable(doc, {
+        startY: yPos,
+        head: tableHeaders,
+        body: tableRows,
+        theme: "striped",
+        headStyles: { fillColor: [30, 41, 59], fontSize: 8.5 },
+        bodyStyles: { fontSize: 8 },
+        columnStyles: {
+          0: { cellWidth: 28, halign: "center" },
+          1: { cellWidth: 45 },
+          2: { cellWidth: 32, halign: "center" },
+          3: { cellWidth: 30, halign: "right" },
+          4: { cellWidth: 47 }
+        },
+        didDrawPage: (dataArg) => {
+          const totalPages = doc.internal.getNumberOfPages();
+          const pageCurrent = dataArg.pageNumber;
+          doc.setFontSize(8);
+          doc.setFont("Helvetica", "normal");
+          doc.text(
+            `Page ${pageCurrent} of ${totalPages}`,
+            doc.internal.pageSize.width - 25,
+            doc.internal.pageSize.height - 10
+          );
+        }
+      });
+
+      doc.save(`Expenses_${new Date().toISOString().slice(0, 10)}.pdf`);
+    } catch (err) {
+      console.error("Export PDF error:", err);
+      alert(err.response?.data?.error || "Failed to generate PDF report.");
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -236,6 +413,20 @@ function Expenses() {
           <p className="text-[18px] font-medium text-brand-subtext mt-1">Audit, categorize, and record operating expenses for the shop</p>
         </div>
         <div className="flex items-center gap-3">
+          <button
+            onClick={handleExportExcel}
+            className="inline-flex h-11 items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-4 text-xs font-bold text-emerald-700 hover:bg-emerald-100 transition-colors shadow-sm"
+          >
+            <FileSpreadsheet className="h-4 w-4" />
+            Export Excel
+          </button>
+          <button
+            onClick={handleExportPDF}
+            className="inline-flex h-11 items-center gap-2 rounded-xl border border-red-200 bg-red-50 px-4 text-xs font-bold text-brand-danger hover:bg-red-100 transition-colors shadow-sm"
+          >
+            <FileText className="h-4 w-4" />
+            Export PDF
+          </button>
           <button
             onClick={fetchExpenses}
             className="flex h-11 w-11 items-center justify-center rounded-xl border border-brand-border bg-white text-brand-subtext hover:bg-slate-50 transition-colors shadow-sm"

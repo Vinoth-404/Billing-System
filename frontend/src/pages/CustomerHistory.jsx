@@ -302,10 +302,21 @@ function CustomerHistory() {
           8: { cellWidth: 18, halign: "right" },
           9: { cellWidth: 22, halign: "right" },
           10: { cellWidth: 18, halign: "center" }
+        },
+        didDrawPage: (dataArg) => {
+          const totalPages = doc.internal.getNumberOfPages();
+          const pageCurrent = dataArg.pageNumber;
+          doc.setFontSize(8);
+          doc.setFont("Helvetica", "normal");
+          doc.text(
+            `Page ${pageCurrent} of ${totalPages}`,
+            doc.internal.pageSize.width - 25,
+            doc.internal.pageSize.height - 10
+          );
         }
       });
 
-      doc.save(`CustomerHistory_${new Date().toISOString().slice(0, 10)}.pdf`);
+      doc.save(`Customer_History_${new Date().toISOString().slice(0, 10)}.pdf`);
     } catch (err) {
       console.error("Export PDF error:", err);
       alert(err.response?.data?.error || "Failed to generate PDF report.");
@@ -343,7 +354,7 @@ function CustomerHistory() {
       const link = document.createElement("a");
       link.href = url;
       const safeName = (selectedCustomer.customer_name || "Customer").replace(/[^a-zA-Z0-9]/g, "_");
-      link.setAttribute("download", `Ledger_${safeName}_${new Date().toISOString().slice(0, 10)}.xlsx`);
+      link.setAttribute("download", `Customer_Ledger_${safeName}_${new Date().toISOString().slice(0, 10)}.xlsx`);
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
@@ -374,24 +385,26 @@ function CustomerHistory() {
 
     const custName = selectedCustomer.customer_name || "Customer";
     const custPhone = selectedCustomer.customer_phone || "N/A";
+    const shopTitle = settings.shop_name || "My Slipper Shop";
 
     const doc = new jsPDF({ orientation: "landscape" });
 
     doc.setFont("Helvetica", "bold");
     doc.setFontSize(18);
-    doc.text("Customer Purchase Ledger", 14, 15);
+    doc.text(shopTitle, 14, 15);
 
     doc.setFontSize(12);
-    doc.text(`Customer: ${custName}${custPhone !== "N/A" ? ` | Mobile: ${custPhone}` : ""}`, 14, 22);
+    doc.text(`Customer Ledger: ${custName}${custPhone !== "N/A" ? ` (${custPhone})` : ""}`, 14, 22);
 
     doc.setFont("Helvetica", "normal");
     doc.setFontSize(9);
-    doc.text(`Generated Date: ${new Date().toLocaleString()}`, 14, 28);
+    doc.text(`Period: ${detailStartDate || "Lifetime"} to ${detailEndDate || "Present"}`, 14, 28);
+    doc.text(`Generated Date: ${new Date().toLocaleString()}`, 14, 33);
     if (detailSearch.trim() !== "") {
-      doc.text(`Applied Filters: Search: "${detailSearch}"`, 14, 33);
+      doc.text(`Applied Filters: Search: "${detailSearch}"`, 14, 38);
     }
 
-    const yPos = detailSearch.trim() !== "" ? 39 : 34;
+    let yPos = detailSearch.trim() !== "" ? 44 : 39;
 
     const tableHeaders = [
       ["Invoice No", "Date", "Customer", "Product", "Article No", "Qty", "Rate", "Discount", "GST", "Amount", "Payment"]
@@ -436,11 +449,22 @@ function CustomerHistory() {
         8: { cellWidth: 20, halign: "right" },
         9: { cellWidth: 24, halign: "right" },
         10: { cellWidth: 18, halign: "center" }
+      },
+      didDrawPage: (dataArg) => {
+        const totalPages = doc.internal.getNumberOfPages();
+        const pageCurrent = dataArg.pageNumber;
+        doc.setFontSize(8);
+        doc.setFont("Helvetica", "normal");
+        doc.text(
+          `Page ${pageCurrent} of ${totalPages}`,
+          doc.internal.pageSize.width - 25,
+          doc.internal.pageSize.height - 10
+        );
       }
     });
 
     const safeName = custName.replace(/[^a-zA-Z0-9]/g, "_");
-    doc.save(`Ledger_${safeName}_${new Date().toISOString().slice(0, 10)}.pdf`);
+    doc.save(`Customer_Ledger_${safeName}_${new Date().toISOString().slice(0, 10)}.pdf`);
   };
 
   // ============================================================
