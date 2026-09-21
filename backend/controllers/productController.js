@@ -3,6 +3,14 @@ const { sendSMS } = require("../services/smsService");
 const bcrypt = require("bcryptjs");
 const { syncProductNotifications } = require("../services/notificationService");
 const bwipjs = require("bwip-js");
+const fs = require("fs");
+const path = require("path");
+const {
+  getTimestampString,
+  getFormattedDateTime,
+  generateDatabaseDump,
+  restoreDatabaseFromSql
+} = require("../services/backupService");
 
 // Helper to execute query with promise
 const query = async (sql, params = []) => {
@@ -1129,6 +1137,196 @@ exports.generateMissingBarcodes = async (req, res) => {
     res.json({ message: `Successfully generated barcodes for ${count} products.`, count });
   } catch (err) {
     res.status(500).json({ error: err.message });
+  }
+};
+
+// --- DATABASE BACKUP & RESTORE CONTROLLERS ---
+
+// Get Backup Status
+exports.getBackupStatus = async (req, res) => {
+  try {
+    const results = await query("SELECT * FROM settings WHERE setting_key IN ('backup_location', 'last_backup_time', 'last_backup_status', 'last_backup_file')");
+    const backupSettings = {};
+    results.forEach((row) => {
+      backupSettings[row.setting_key] = row.setting_value;
+    });
+
+    const location = backupSettings.backup_location || "";
+    let locationExists = false;
+    if (location) {
+      try {
+        locationExists = fs.existsSync(path.normalize(location));
+      } catch (e) {
+        locationExists = false;
+      }
+    }
+
+    res.json({
+      backup_location: location,
+      last_backup_time: backupSettings.last_backup_time || "Never",
+      last_backup_status: backupSettings.last_backup_status || (location ? (locationExists ? "Ready" : "Folder Missing") : "Not Configured"),
+      last_backup_file: backupSettings.last_backup_file || "",
+      location_exists: locationExists
+    });
+  } catch (err) {
+    console.error("[Backup] Error getting backup status:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+};
+
+// Set / Change Backup Location
+exports.setBackupLocation = async (req, res) => {
+  const backupLocation = req.body?.backupLocation;
+  if (!backupLocation || typeof backupLocation !== "string" || backupLocation.trim() === "") {
+    return res.status(400).json({ error: "Please provide a valid backup location folder path." });
+  }
+
+  const normalizedPath = path.normalize(backupLocation.trim());
+
+  try {
+    // Check if path exists, or attempt to create directory if missing
+    if (!fs.existsSync(normalizedPath)) {
+      try {
+        fs.mkdirSync(normalizedPath, { recursive: true });
+      } catch (mkdirErr) {
+        return res.status(400).json({ error: `Selected folder path does not exist and could not be created: ${mkdirErr.message}` });
+      }
+    }
+
+    // Verify write permissions by writing a small test file check
+    const testFile = path.join(normalizedPath, `.write_test_${Date.now()}.tmp`);
+    try {
+      fs.writeFileSync(testFile, "test");
+      fs.unlinkSync(testFile);
+    } catch (writeErr) {
+      return res.status(400).json({ error: "The selected folder is not writable. Please select a different folder." });
+    }
+
+    // Save to settings table
+    await query(
+      "INSERT INTO settings (setting_key, setting_value) VALUES ('backup_location', ?) ON DUPLICATE KEY UPDATE setting_value = ?",
+      [normalizedPath, normalizedPath]
+    );
+
+    await query(
+      "INSERT INTO settings (setting_key, setting_value) VALUES ('last_backup_status', 'Configured') ON DUPLICATE KEY UPDATE setting_value = 'Configured'"
+    );
+
+    console.log(`[Backup] Location set to: ${normalizedPath}`);
+    res.json({
+      success: true,
+      message: "Backup location saved successfully!",
+      backup_location: normalizedPath
+    });
+  } catch (err) {
+    console.error("[Backup] Error setting location:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+};
+
+// Create Database Backup Now
+exports.createBackup = async (req, res) => {
+  try {
+    const reqLocation = req.body?.backupLocation;
+    let location = "";
+
+    if (reqLocation && reqLocation.trim() !== "") {
+      location = path.normalize(reqLocation.trim());
+    } else {
+      const locRes = await query("SELECT setting_value FROM settings WHERE setting_key = 'backup_location'");
+      if (locRes.length > 0 && locRes[0].setting_value) {
+        location = path.normalize(locRes[0].setting_value);
+      }
+    }
+
+    if (!location || !fs.existsSync(location)) {
+      return res.status(400).json({ error: "Please select a backup location before creating a backup." });
+    }
+
+    console.log("[Backup] Generating SQL dump for slipper_shop...");
+    const sqlDump = await generateDatabaseDump();
+
+    const timestampStr = getTimestampString();
+    const filename = `slipper_shop_backup_${timestampStr}.sql`;
+    const filePath = path.join(location, filename);
+
+    fs.writeFileSync(filePath, sqlDump, "utf8");
+    console.log(`[Backup] Backup created successfully at: ${filePath}`);
+
+    const formattedTime = getFormattedDateTime();
+    await query(
+      "INSERT INTO settings (setting_key, setting_value) VALUES ('last_backup_time', ?) ON DUPLICATE KEY UPDATE setting_value = ?",
+      [formattedTime, formattedTime]
+    );
+    await query(
+      "INSERT INTO settings (setting_key, setting_value) VALUES ('last_backup_status', 'Success') ON DUPLICATE KEY UPDATE setting_value = 'Success'"
+    );
+    await query(
+      "INSERT INTO settings (setting_key, setting_value) VALUES ('last_backup_file', ?) ON DUPLICATE KEY UPDATE setting_value = ?",
+      [filename, filename]
+    );
+
+    res.json({
+      success: true,
+      message: "Database backup created successfully!",
+      filename,
+      backup_location: location,
+      last_backup_time: formattedTime
+    });
+  } catch (err) {
+    console.error("[Backup] Error creating backup:", err.message);
+    await query(
+      "INSERT INTO settings (setting_key, setting_value) VALUES ('last_backup_status', 'Failed') ON DUPLICATE KEY UPDATE setting_value = 'Failed'"
+    ).catch(() => {});
+    res.status(500).json({ error: `Backup failed: ${err.message}` });
+  }
+};
+
+// Restore Database from Backup File
+exports.restoreBackup = async (req, res) => {
+  const sqlContent = req.body?.sqlContent;
+  console.log("[Backup] Restore database request received.");
+
+  if (!sqlContent || typeof sqlContent !== "string" || sqlContent.trim() === "") {
+    return res.status(400).json({ error: "No SQL backup content provided for restoration." });
+  }
+
+  try {
+    // 1. SAFETY STEP: Automatically create a safety backup of CURRENT database first!
+    const locRes = await query("SELECT setting_value FROM settings WHERE setting_key = 'backup_location'");
+    const location = locRes.length > 0 && locRes[0].setting_value ? path.normalize(locRes[0].setting_value) : "";
+
+    if (location && fs.existsSync(location)) {
+      try {
+        console.log("[Backup] Creating automatic safety backup of current database before restore...");
+        const currentDump = await generateDatabaseDump();
+        const safetyFilename = `slipper_shop_auto_safety_backup_${getTimestampString()}.sql`;
+        fs.writeFileSync(path.join(location, safetyFilename), currentDump, "utf8");
+        console.log(`[Backup] Safety backup saved as: ${safetyFilename}`);
+      } catch (safetyErr) {
+        console.warn("[Backup] Warning: Could not create auto safety backup before restore:", safetyErr.message);
+      }
+    }
+
+    // 2. Perform Restore
+    console.log("[Backup] Executing restore SQL script...");
+    await restoreDatabaseFromSql(sqlContent);
+
+    // 3. Update restore status in DB settings
+    const formattedTime = getFormattedDateTime();
+    await query(
+      "INSERT INTO settings (setting_key, setting_value) VALUES ('last_backup_status', ?) ON DUPLICATE KEY UPDATE setting_value = ?",
+      [`Restored on ${formattedTime}`, `Restored on ${formattedTime}`]
+    );
+
+    console.log("[Backup] Database restore completed successfully!");
+    res.json({
+      success: true,
+      message: "Database restored successfully. Please restart the application if required."
+    });
+  } catch (err) {
+    console.error("[Backup] Restore failed:", err.message);
+    res.status(500).json({ error: `Database restore failed: ${err.message}` });
   }
 };
 

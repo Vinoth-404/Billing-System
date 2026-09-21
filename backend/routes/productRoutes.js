@@ -32,6 +32,12 @@ router.post("/settings/recovery-pin", productController.setRecoveryPin);
 router.post("/settings/verify-recovery-pin", productController.verifyRecoveryPin);
 router.post("/settings/reset-password-pin", productController.resetPasswordWithPin);
 
+// Database Backup & Restore routes
+router.get("/backup/status", productController.getBackupStatus);
+router.post("/backup/set-location", productController.setBackupLocation);
+router.post("/backup/create", productController.createBackup);
+router.post("/backup/restore", productController.restoreBackup);
+
 // Master Tables Management routes
 router.get("/master/:category", productController.getMasterItems);
 router.post("/master/:category", productController.addMasterItem);

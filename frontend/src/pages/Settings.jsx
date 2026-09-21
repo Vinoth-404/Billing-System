@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Save, Store, ShieldCheck, Upload, RefreshCcw, Eye, EyeOff, KeyRound, CheckCircle2, AlertCircle } from "lucide-react";
+import { Save, Store, ShieldCheck, Upload, RefreshCcw, Eye, EyeOff, KeyRound, CheckCircle2, AlertCircle, Database, HardDrive, FolderOpen, Clock, AlertTriangle, X } from "lucide-react";
 import axios from "axios";
 import { useSettings } from "../context/SettingsContext";
 const API = import.meta.env.VITE_API_URL;
@@ -26,6 +26,24 @@ function Settings() {
   const [pinAlert, setPinAlert] = useState({ type: "", message: "" });
   const [pinLoading, setPinLoading] = useState(false);
 
+  // Data Backup fields
+  const [backupStatus, setBackupStatus] = useState({
+    backup_location: "",
+    last_backup_time: "Never",
+    last_backup_status: "Not Configured",
+    last_backup_file: "",
+    location_exists: false
+  });
+  const [backupAlert, setBackupAlert] = useState({ type: "", message: "" });
+  const [backupLoading, setBackupLoading] = useState(false);
+  const [showLocationModal, setShowLocationModal] = useState(false);
+  const [locationInput, setLocationInput] = useState("");
+  const [locationModalNotice, setLocationModalNotice] = useState("");
+  const [showRestoreModal, setShowRestoreModal] = useState(false);
+  const [restoreFileContent, setRestoreFileContent] = useState("");
+  const [restoreFileName, setRestoreFileName] = useState("");
+  const [restoreLoading, setRestoreLoading] = useState(false);
+
   // Password change toggle
   const [isChangingPassword, setIsChangingPassword] = useState(false);
 
@@ -34,6 +52,17 @@ function Settings() {
   const [loading, setLoading] = useState(false);
   const [passwordLoading, setPasswordLoading] = useState(false);
 
+  const fetchBackupStatus = async () => {
+    try {
+      const res = await axios.get(`${API}/api/backup/status`);
+      if (res.data) {
+        setBackupStatus(res.data);
+      }
+    } catch (err) {
+      console.error("[Backup] Failed to fetch backup status:", err);
+    }
+  };
+
   useEffect(() => {
     if (settings) {
       setShopName(settings.shop_name || "");
@@ -41,6 +70,7 @@ function Settings() {
       setShopPhone(settings.shop_phone || "");
       setLogoBase64(settings.shop_logo || "");
     }
+    fetchBackupStatus();
   }, [settings]);
 
   const handleSaveInfo = async (e) => {
@@ -180,6 +210,110 @@ function Settings() {
       });
     } finally {
       setPinLoading(false);
+    }
+  };
+
+  const handleBackupNow = async () => {
+    setBackupAlert({ type: "", message: "" });
+
+    if (!backupStatus.backup_location || !backupStatus.location_exists) {
+      setLocationInput(backupStatus.backup_location || "");
+      setLocationModalNotice("Please select a backup location before creating a backup.");
+      setShowLocationModal(true);
+      return;
+    }
+
+    setBackupLoading(true);
+
+    try {
+      const res = await axios.post(`${API}/api/backup/create`);
+      setBackupAlert({
+        type: "success",
+        message: `${res.data.message} Saved in: ${res.data.backup_location}`
+      });
+      await fetchBackupStatus();
+      await loadSettings();
+    } catch (err) {
+      setBackupAlert({
+        type: "danger",
+        message: err.response?.data?.error || "Failed to create database backup."
+      });
+    } finally {
+      setBackupLoading(false);
+    }
+  };
+
+  const handleSaveLocation = async (e) => {
+    e.preventDefault();
+    if (!locationInput || locationInput.trim() === "") {
+      return;
+    }
+
+    try {
+      await axios.post(`${API}/api/backup/set-location`, {
+        backupLocation: locationInput
+      });
+
+      setShowLocationModal(false);
+      setLocationModalNotice("");
+      setBackupAlert({
+        type: "success",
+        message: "Backup location saved successfully!"
+      });
+
+      await fetchBackupStatus();
+      await loadSettings();
+    } catch (err) {
+      setBackupAlert({
+        type: "danger",
+        message: err.response?.data?.error || "Failed to save backup location."
+      });
+    }
+  };
+
+  const handleFileSelectForRestore = (e) => {
+    const file = e.target.files[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        setRestoreFileContent(event.target.result);
+        setRestoreFileName(file.name);
+        setShowRestoreModal(true);
+      };
+      reader.readAsText(file);
+    }
+    // Clear input value so same file can be re-selected if needed
+    e.target.value = "";
+  };
+
+  const handleConfirmRestore = async () => {
+    setRestoreLoading(true);
+    setBackupAlert({ type: "", message: "" });
+
+    try {
+      const res = await axios.post(`${API}/api/backup/restore`, {
+        sqlContent: restoreFileContent
+      });
+
+      setShowRestoreModal(false);
+      setRestoreFileContent("");
+      setRestoreFileName("");
+
+      setBackupAlert({
+        type: "success",
+        message: res.data.message || "Database restored successfully. Please restart the application if required."
+      });
+
+      await fetchBackupStatus();
+      await loadSettings();
+    } catch (err) {
+      setShowRestoreModal(false);
+      setBackupAlert({
+        type: "danger",
+        message: err.response?.data?.error || "Database restore failed."
+      });
+    } finally {
+      setRestoreLoading(false);
     }
   };
 
@@ -590,7 +724,232 @@ function Settings() {
             )}
           </div>
         </div>
+
+        {/* Card 3: Data Backup & Restore */}
+        <div className="glass-card rounded-2xl p-7 shadow-premium bg-white space-y-6">
+          <div className="flex items-center gap-2 border-b border-slate-100 pb-3">
+            <Database className="h-6 w-6 text-brand-accent" />
+            <h3 className="text-[20px] font-bold text-brand-text">Data Backup</h3>
+          </div>
+
+          {backupAlert.message && (
+            <div className={`rounded-xl p-4 text-[15px] font-bold border ${
+              backupAlert.type === "success" 
+                ? "bg-emerald-50 text-emerald-700 border-emerald-200" 
+                : "bg-red-50 text-brand-danger border-red-200"
+            }`}>
+              {backupAlert.message}
+            </div>
+          )}
+
+          {/* Status Grid */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 bg-slate-50/70 p-5 rounded-xl border border-slate-200/60">
+            <div>
+              <span className="block text-[12px] font-bold uppercase tracking-wider text-brand-subtext mb-1">Last Backup</span>
+              <span className="text-[15px] font-extrabold text-brand-text flex items-center gap-1.5">
+                <Clock className="h-4 w-4 text-slate-400" />
+                {backupStatus.last_backup_time || "Never"}
+              </span>
+            </div>
+
+            <div className="md:col-span-1">
+              <span className="block text-[12px] font-bold uppercase tracking-wider text-brand-subtext mb-1">Backup Location</span>
+              <span className="text-[14px] font-bold text-brand-text truncate block max-w-full" title={backupStatus.backup_location || "Not Configured"}>
+                {backupStatus.backup_location ? backupStatus.backup_location : <span className="text-amber-600 font-semibold">Not Configured</span>}
+              </span>
+            </div>
+
+            <div>
+              <span className="block text-[12px] font-bold uppercase tracking-wider text-brand-subtext mb-1">Backup Status</span>
+              <div>
+                {backupStatus.location_exists ? (
+                  <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-3 py-1 text-xs font-bold text-emerald-700 border border-emerald-200">
+                    <CheckCircle2 className="h-3.5 w-3.5" />
+                    {backupStatus.last_backup_status || "Ready"}
+                  </span>
+                ) : backupStatus.backup_location ? (
+                  <span className="inline-flex items-center gap-1.5 rounded-full bg-red-50 px-3 py-1 text-xs font-bold text-brand-danger border border-red-200">
+                    <AlertCircle className="h-3.5 w-3.5" />
+                    Folder Missing
+                  </span>
+                ) : (
+                  <span className="inline-flex items-center gap-1.5 rounded-full bg-amber-50 px-3 py-1 text-xs font-bold text-amber-700 border border-amber-200">
+                    <AlertCircle className="h-3.5 w-3.5" />
+                    Not Configured
+                  </span>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* Action Buttons */}
+          <div className="flex flex-wrap items-center gap-3 pt-2">
+            <button
+              type="button"
+              onClick={handleBackupNow}
+              disabled={backupLoading}
+              className="flex items-center gap-2 rounded-xl bg-brand-accent px-6 py-3 text-[15px] font-bold text-white shadow-md shadow-brand-accent/20 transition-all hover:bg-blue-600 disabled:opacity-50"
+            >
+              {backupLoading ? <RefreshCcw className="h-4.5 w-4.5 animate-spin" /> : <HardDrive className="h-4.5 w-4.5" />}
+              Backup Now
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                setLocationInput(backupStatus.backup_location || "");
+                setLocationModalNotice("");
+                setShowLocationModal(true);
+              }}
+              className="flex items-center gap-2 rounded-xl border border-brand-border bg-white hover:bg-slate-50 px-5 py-3 text-[15px] font-bold text-brand-text transition-all"
+            >
+              <FolderOpen className="h-4.5 w-4.5 text-brand-accent" />
+              Change Backup Location
+            </button>
+
+            <label className="flex items-center gap-2 rounded-xl border border-brand-border bg-white hover:bg-slate-50 px-5 py-3 text-[15px] font-bold text-brand-text cursor-pointer transition-all">
+              <Upload className="h-4.5 w-4.5 text-brand-accent" />
+              Restore Backup
+              <input type="file" accept=".sql" onChange={handleFileSelectForRestore} className="hidden" />
+            </label>
+          </div>
+        </div>
       </div>
+
+      {/* MODAL 1: CHANGE / SELECT BACKUP LOCATION */}
+      {showLocationModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4 backdrop-blur-sm animate-fade-in">
+          <div className="w-full max-w-lg rounded-2xl bg-white p-7 shadow-premium space-y-5 animate-scale-up">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <div className="flex items-center gap-2">
+                <FolderOpen className="h-6 w-6 text-brand-accent" />
+                <h3 className="text-[19px] font-bold text-brand-text">Select Backup Location</h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowLocationModal(false)}
+                className="text-slate-400 hover:text-slate-600"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            {locationModalNotice && (
+              <div className="rounded-xl border border-amber-200 bg-amber-50 p-3.5 text-xs font-bold text-amber-800 flex items-center gap-2">
+                <AlertCircle className="h-4 w-4 shrink-0" />
+                {locationModalNotice}
+              </div>
+            )}
+
+            <form onSubmit={handleSaveLocation} className="space-y-4">
+              <div>
+                <label className="block text-[13px] font-bold uppercase tracking-wider text-brand-subtext mb-2">
+                  PC Folder Path
+                </label>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={locationInput}
+                    onChange={(e) => setLocationInput(e.target.value)}
+                    placeholder="e.g. D:\SlipperShopBackups or C:\Backups"
+                    className="h-11 flex-1 rounded-xl border border-brand-border bg-white px-4 text-sm font-semibold outline-none focus:border-brand-primary/60 focus:ring-2 focus:ring-brand-primary/10"
+                    required
+                    autoFocus
+                  />
+                  {"showDirectoryPicker" in window && (
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        try {
+                          const handle = await window.showDirectoryPicker();
+                          if (handle && handle.name) {
+                            setLocationInput(`C:\\${handle.name}`);
+                          }
+                        } catch (err) {
+                          // Picker cancelled or unsupported
+                        }
+                      }}
+                      className="h-11 px-3.5 rounded-xl border border-brand-border bg-slate-50 hover:bg-slate-100 text-xs font-bold text-brand-text flex items-center gap-1.5"
+                      title="Browse Folders"
+                    >
+                      <FolderOpen className="h-4 w-4 text-brand-accent" />
+                      Browse
+                    </button>
+                  )}
+                </div>
+                <p className="text-[12px] font-medium text-brand-subtext mt-1.5">
+                  Enter any valid directory path on your PC (e.g. D:\SlipperShopBackups).
+                </p>
+              </div>
+
+              <div className="flex justify-end gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowLocationModal(false)}
+                  className="rounded-xl border border-brand-border bg-white px-5 py-2.5 text-xs font-bold text-brand-subtext hover:bg-slate-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="rounded-xl bg-brand-accent px-6 py-2.5 text-xs font-bold text-white shadow-md shadow-brand-accent/20 hover:bg-blue-600"
+                >
+                  Save Location
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL 2: CONFIRM RESTORE BACKUP */}
+      {showRestoreModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4 backdrop-blur-sm animate-fade-in">
+          <div className="w-full max-w-lg rounded-2xl bg-white p-7 shadow-premium space-y-5 animate-scale-up border border-red-100">
+            <div className="flex items-center gap-3 border-b border-slate-100 pb-3">
+              <div className="h-10 w-10 rounded-xl bg-red-50 text-red-600 flex items-center justify-center border border-red-200">
+                <AlertTriangle className="h-5 w-5" />
+              </div>
+              <div>
+                <h3 className="text-[19px] font-extrabold text-brand-text">Confirm Database Restore</h3>
+                <p className="text-xs font-semibold text-brand-subtext">Selected file: {restoreFileName}</p>
+              </div>
+            </div>
+
+            <div className="rounded-xl border border-red-200 bg-red-50/80 p-4 text-sm font-bold text-brand-danger space-y-1">
+              <p>Restoring this backup will replace the current database data with the selected backup. Continue?</p>
+            </div>
+
+            <p className="text-xs font-medium text-slate-500">
+              <strong className="text-slate-700">Safety Guarantee:</strong> An automatic safety backup of your current database will be saved to your backup folder before restoring.
+            </p>
+
+            <div className="flex justify-end gap-3 pt-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setShowRestoreModal(false);
+                  setRestoreFileContent("");
+                  setRestoreFileName("");
+                }}
+                disabled={restoreLoading}
+                className="rounded-xl border border-brand-border bg-white px-5 py-2.5 text-xs font-bold text-brand-subtext hover:bg-slate-50 disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmRestore}
+                disabled={restoreLoading}
+                className="flex items-center gap-2 rounded-xl bg-red-600 px-6 py-2.5 text-xs font-bold text-white shadow-md shadow-red-600/20 hover:bg-red-700 disabled:opacity-50"
+              >
+                {restoreLoading && <RefreshCcw className="h-4 w-4 animate-spin" />}
+                Confirm & Restore
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
