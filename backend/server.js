@@ -27,6 +27,12 @@ app.get("/", (req, res) => {
   res.send("Slipper Shop Backend Running");
 });
 
-app.listen(process.env.PORT || 5000, () => {
-  console.log("Server running on port 5000");
+app.get("/healthz", (req, res) => {
+  res.status(200).json({ status: "ok" });
+});
+
+const PORT = process.env.PORT || 5000;
+
+app.listen(PORT, "0.0.0.0", () => {
+  console.log(`Server running on port ${PORT}`);
 });
