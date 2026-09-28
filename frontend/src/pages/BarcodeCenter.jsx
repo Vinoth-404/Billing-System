@@ -17,6 +17,7 @@ function BarcodeCenter() {
   const { settings } = useSettings();
   const [articleNumber, setArticleNumber] = useState("");
   const [mrp, setMrp] = useState("");
+  const [secretCode, setSecretCode] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [generatedProduct, setGeneratedProduct] = useState(null);
@@ -42,6 +43,10 @@ function BarcodeCenter() {
     if (e) e.preventDefault();
     if (!articleNumber.trim()) {
       setError("Article Number is required.");
+      return;
+    }
+    if (!secretCode.trim()) {
+      setError("Secret Code is required.");
       return;
     }
 
@@ -74,7 +79,7 @@ function BarcodeCenter() {
     try {
       const canvas = document.createElement("canvas");
       canvas.width = 460;
-      canvas.height = 300;
+      canvas.height = 330;
       const ctx = canvas.getContext("2d");
 
       // White background
@@ -88,7 +93,7 @@ function BarcodeCenter() {
       ctx.strokeRect(12, 12, canvas.width - 24, canvas.height - 24);
       ctx.setLineDash([]);
 
-      let currentY = 50;
+      let currentY = 45;
 
       // 1. Article Number
       ctx.fillStyle = "#334155";
@@ -97,7 +102,15 @@ function BarcodeCenter() {
       ctx.fillText(`Art No: ${generatedProduct.article_number}`, canvas.width / 2, currentY);
       currentY += 28;
 
-      // 2. Barcode Image
+      // 2. Secret Code
+      if (secretCode) {
+        ctx.fillStyle = "#475569";
+        ctx.font = "bold 20px monospace";
+        ctx.fillText(secretCode, canvas.width / 2, currentY);
+        currentY += 26;
+      }
+
+      // 3. Barcode Image
       const barcodeUrl = `${API}/api/barcode/image/${generatedProduct.barcode}`;
       const barcodeImg = new Image();
       barcodeImg.crossOrigin = "anonymous";
@@ -108,17 +121,17 @@ function BarcodeCenter() {
       });
 
       const barcodeWidth = 350;
-      const barcodeHeight = 90;
+      const barcodeHeight = 85;
       ctx.drawImage(barcodeImg, (canvas.width - barcodeWidth) / 2, currentY, barcodeWidth, barcodeHeight);
-      currentY += barcodeHeight + 28;
+      currentY += barcodeHeight + 26;
 
-      // 3. Barcode Value Text
+      // 4. Barcode Value Text
       ctx.fillStyle = "#64748B";
       ctx.font = "bold 18px monospace";
       ctx.fillText(generatedProduct.barcode, canvas.width / 2, currentY);
-      currentY += 36;
+      currentY += 34;
 
-      // 4. Prices (MRP strikethrough & Selling Price)
+      // 5. Prices (MRP strikethrough & Selling Price)
       const sellingStr = `₹${Number(generatedProduct.selling_price).toLocaleString("en-IN")}`;
       if (mrp && !isNaN(Number(mrp)) && Number(mrp) > 0) {
         const mrpStr = `₹${Number(mrp).toLocaleString("en-IN")}`;
@@ -182,37 +195,45 @@ function BarcodeCenter() {
         format: [58, 40]
       });
 
-      let currentY = 8;
+      let currentY = 6;
 
       // 1. Draw Article Number
       doc.setFont("courier", "bold");
-      doc.setFontSize(9);
+      doc.setFontSize(8.5);
       doc.text(`Art No: ${generatedProduct.article_number}`, 29, currentY, { align: "center" });
-      currentY += 5;
+      currentY += 4.5;
 
-      // 2. Draw Barcode Image (Width: 46mm, Height: 12mm)
+      // 2. Draw Secret Code
+      if (secretCode) {
+        doc.setFont("courier", "bold");
+        doc.setFontSize(8.5);
+        doc.text(secretCode, 29, currentY, { align: "center" });
+        currentY += 4.5;
+      }
+
+      // 3. Draw Barcode Image (Width: 46mm, Height: 11mm)
       const barcodeUrl = `${API}/api/barcode/image/${generatedProduct.barcode}`;
       const barcodeDataUrl = await getBase64FromUrl(barcodeUrl);
-      doc.addImage(barcodeDataUrl, "PNG", 6, currentY, 46, 12);
-      currentY += 15;
+      doc.addImage(barcodeDataUrl, "PNG", 6, currentY, 46, 11);
+      currentY += 13.5;
 
-      // 3. Draw Barcode Value Text under the barcode
+      // 4. Draw Barcode Value Text under the barcode
       doc.setFont("courier", "bold");
-      doc.setFontSize(8);
+      doc.setFontSize(7.5);
       doc.text(generatedProduct.barcode, 29, currentY, { align: "center" });
-      currentY += 6;
+      currentY += 5;
 
-      // 4. Draw Prices (MRP strikethrough & Inventory Selling Price)
+      // 5. Draw Prices (MRP strikethrough & Inventory Selling Price)
       const sellingStr = `Rs. ${Number(generatedProduct.selling_price).toLocaleString("en-IN")}`;
 
       if (mrp && !isNaN(Number(mrp)) && Number(mrp) > 0) {
         const mrpStr = `Rs. ${Number(mrp).toLocaleString("en-IN")}`;
         doc.setFont("helvetica", "normal");
-        doc.setFontSize(9);
+        doc.setFontSize(8.5);
         const mrpWidth = doc.getTextWidth(mrpStr);
 
         doc.setFont("helvetica", "bold");
-        doc.setFontSize(9);
+        doc.setFontSize(8.5);
         const sellingWidth = doc.getTextWidth(sellingStr);
 
         const gap = 3;
@@ -235,7 +256,7 @@ function BarcodeCenter() {
         doc.text(sellingStr, startX + mrpWidth + gap, currentY);
       } else {
         doc.setFont("helvetica", "bold");
-        doc.setFontSize(9);
+        doc.setFontSize(8.5);
         doc.setTextColor(0, 0, 0);
         doc.text(sellingStr, 29, currentY, { align: "center" });
       }
@@ -256,7 +277,7 @@ function BarcodeCenter() {
       .post(`${API}/api/barcode/print/${generatedProduct.id}`, { copies: 1 })
       .then((res) => {
         if (res.data) {
-          setPrintLabel({ ...res.data, userMrp: mrp });
+          setPrintLabel({ ...res.data, userMrp: mrp, secretCode: secretCode });
           setTimeout(() => {
             window.print();
             setPrintLoading(false);
@@ -276,6 +297,7 @@ function BarcodeCenter() {
   const handleClear = () => {
     setArticleNumber("");
     setMrp("");
+    setSecretCode("");
     setGeneratedProduct(null);
     setError("");
   };
@@ -323,6 +345,20 @@ function BarcodeCenter() {
               />
             </div>
 
+            <div>
+              <label className="block text-[15px] font-bold uppercase tracking-wider text-brand-subtext mb-2">
+                Secret Code *
+              </label>
+              <input
+                type="text"
+                value={secretCode}
+                onChange={(e) => setSecretCode(e.target.value)}
+                placeholder="Enter Secret Code (e.g. IKP)"
+                className="h-12 w-full rounded-xl border border-brand-border bg-white px-4 text-[16px] placeholder:text-[15px] font-bold tracking-wide outline-none focus:border-brand-primary/60 focus:ring-2 focus:ring-brand-primary/10 transition-all"
+                required
+              />
+            </div>
+
             <button
               type="submit"
               disabled={loading}
@@ -354,6 +390,10 @@ function BarcodeCenter() {
                   <span className="text-[16px] font-bold text-brand-accent mt-0.5 block">{generatedProduct.article_number}</span>
                 </div>
                 <div>
+                  <span className="text-[14px] uppercase text-brand-subtext font-bold block">Secret Code</span>
+                  <span className="text-[16px] font-mono font-bold text-slate-800 mt-0.5 block">{secretCode}</span>
+                </div>
+                <div className="col-span-2">
                   <span className="text-[14px] uppercase text-brand-subtext font-bold block">Barcode Value</span>
                   <span className="text-[16px] font-mono font-bold text-slate-700 mt-0.5 block">{generatedProduct.barcode}</span>
                 </div>
@@ -379,11 +419,18 @@ function BarcodeCenter() {
               <h3 className="text-[20px] font-bold text-brand-text mb-4">Preview</h3>
               
               {/* Box Sticker Label Preview Box */}
-              <div className="max-w-[260px] mx-auto border border-dashed border-slate-400 p-6 rounded-xl text-center flex flex-col items-center justify-between gap-3 bg-slate-50 shadow-inner min-h-[190px]">
+              <div className="max-w-[260px] mx-auto border border-dashed border-slate-400 p-6 rounded-xl text-center flex flex-col items-center justify-between gap-2.5 bg-slate-50 shadow-inner min-h-[190px]">
                 {/* Article Number */}
                 <div className="text-[15px] font-mono font-bold text-slate-800">
                   Art No: {generatedProduct.article_number}
                 </div>
+
+                {/* Secret Code */}
+                {secretCode && (
+                  <div className="text-[14px] font-mono font-bold text-slate-700">
+                    {secretCode}
+                  </div>
+                )}
 
                 {/* Barcode Code-128 */}
                 <img
@@ -476,17 +523,24 @@ function BarcodeCenter() {
             }
           `}</style>
           <div id="print-zone" className="w-[58mm] mx-auto p-2 bg-white flex flex-col items-center justify-center">
-            <div className="w-[52mm] min-h-[120px] p-2 text-center bg-white flex flex-col items-center justify-center gap-2 break-inside-avoid page-break-after-always shadow-none">
+            <div className="w-[52mm] min-h-[120px] p-2 text-center bg-white flex flex-col items-center justify-center gap-1.5 break-inside-avoid page-break-after-always shadow-none">
               {/* Article Number */}
               <div className="text-[11px] font-mono font-bold text-slate-800">
                 Art No: {printLabel.product.article_number}
               </div>
 
+              {/* Secret Code */}
+              {printLabel.secretCode && (
+                <div className="text-[11px] font-mono font-bold text-slate-800">
+                  {printLabel.secretCode}
+                </div>
+              )}
+
               {/* Code-128 Barcode Image */}
               <img
                 src={printLabel.barcodeDataUrl}
                 alt="Barcode"
-                className="h-11 object-contain my-1"
+                className="h-11 object-contain my-0.5"
               />
 
               {/* Barcode Value */}
@@ -495,7 +549,7 @@ function BarcodeCenter() {
               </div>
 
               {/* Price Display: MRP (Strikethrough) & Selling Price */}
-              <div className="text-[11px] font-bold text-slate-900 mt-1 flex items-center justify-center gap-2">
+              <div className="text-[11px] font-bold text-slate-900 mt-0.5 flex items-center justify-center gap-2">
                 {printLabel.userMrp && !isNaN(Number(printLabel.userMrp)) && Number(printLabel.userMrp) > 0 && (
                   <span className="line-through text-slate-500 font-medium mr-1">
                     ₹{Number(printLabel.userMrp).toLocaleString("en-IN")}
