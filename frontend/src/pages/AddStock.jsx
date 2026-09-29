@@ -6,6 +6,7 @@ function AddStock() {
   const initialFormState = {
     serial_no: "",
     article_number: "",
+    secret_code: "",
     brand: "",
     type: "",
     size: "",
@@ -81,6 +82,7 @@ function AddStock() {
                 discount_percent: res.data.discount_percent || "0",
                 supplier_name: res.data.supplier_name || "",
                 article_number: res.data.article_number || prev.article_number || "",
+                secret_code: res.data.secret_code || prev.secret_code || "",
                 stock: ""
               }));
               setIsExisting(true);
@@ -138,14 +140,15 @@ function AddStock() {
   const handleSubmit = (e) => {
     e.preventDefault();
     
-    // Verify payload contains article_number before sending
+    // Verify payload contains article_number and secret_code before sending
     const payload = {
       ...formData,
-      article_number: formData.article_number ? formData.article_number.trim() : ""
+      article_number: formData.article_number ? formData.article_number.trim() : "",
+      secret_code: formData.secret_code ? formData.secret_code.trim() : ""
     };
 
     // Validations
-    if (!payload.article_number || !payload.brand || !payload.type || !payload.size || !payload.color || !payload.purchase_price || !payload.selling_price || !payload.stock || !payload.supplier_name) {
+    if (!payload.article_number || !payload.secret_code || !payload.brand || !payload.type || !payload.size || !payload.color || !payload.purchase_price || !payload.selling_price || !payload.stock || !payload.supplier_name) {
       setAlert({ type: "danger", message: "Please fill in all required fields." });
       return;
     }
@@ -271,20 +274,37 @@ function AddStock() {
             </div>
           )}
 
-          {/* Article Number Field */}
-          <div>
-            <label className="block text-[15px] font-bold uppercase tracking-wider text-brand-subtext mb-2">
-              Article Number <span className="text-brand-danger">*</span>
-            </label>
-            <input
-              type="text"
-              name="article_number"
-              value={formData.article_number}
-              onChange={handleInputChange}
-              placeholder="e.g. ART1001 or BATA-1001"
-              className="h-12 w-full rounded-xl border border-brand-border bg-white px-4 text-[16px] placeholder:text-[15px] font-medium outline-none focus:border-brand-primary/60 focus:ring-2 focus:ring-brand-primary/10 disabled:bg-slate-50 disabled:text-slate-500 font-bold uppercase"
-              required
-            />
+          {/* Article Number & Secret Code Row */}
+          <div className="grid gap-5 md:grid-cols-2">
+            <div>
+              <label className="block text-[15px] font-bold uppercase tracking-wider text-brand-subtext mb-2">
+                Article Number <span className="text-brand-danger">*</span>
+              </label>
+              <input
+                type="text"
+                name="article_number"
+                value={formData.article_number}
+                onChange={handleInputChange}
+                placeholder="e.g. 5-3841"
+                className="h-12 w-full rounded-xl border border-brand-border bg-white px-4 text-[16px] placeholder:text-[15px] font-medium outline-none focus:border-brand-primary/60 focus:ring-2 focus:ring-brand-primary/10 disabled:bg-slate-50 disabled:text-slate-500 font-bold uppercase"
+                required
+              />
+            </div>
+
+            <div>
+              <label className="block text-[15px] font-bold uppercase tracking-wider text-brand-subtext mb-2">
+                Secret Code <span className="text-brand-danger">*</span>
+              </label>
+              <input
+                type="text"
+                name="secret_code"
+                value={formData.secret_code}
+                onChange={handleInputChange}
+                placeholder="e.g. IKP"
+                className="h-12 w-full rounded-xl border border-brand-border bg-white px-4 text-[16px] placeholder:text-[15px] font-medium outline-none focus:border-brand-primary/60 focus:ring-2 focus:ring-brand-primary/10 font-bold"
+                required
+              />
+            </div>
           </div>
 
           {/* Product Specifications Row */}

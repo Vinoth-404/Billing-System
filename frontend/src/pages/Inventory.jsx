@@ -27,6 +27,7 @@ function Inventory() {
   const [editingProduct, setEditingProduct] = useState(null);
   const [editForm, setEditForm] = useState({
     article_number: "",
+    secret_code: "",
     brand: "",
     type: "",
     size: "",
@@ -133,6 +134,7 @@ function Inventory() {
       const query = searchArtNo.toLowerCase().trim();
       const matchSearch = query === "" || (
         (p.article_number && p.article_number.toString().toLowerCase().includes(query)) ||
+        (p.secret_code && p.secret_code.toString().toLowerCase().includes(query)) ||
         (p.serial_no && p.serial_no.toLowerCase().includes(query)) ||
         (p.brand && p.brand.toLowerCase().includes(query)) ||
         (p.type && p.type.toLowerCase().includes(query)) ||
@@ -177,6 +179,7 @@ function Inventory() {
     setEditingProduct(prod);
     setEditForm({
       article_number: prod.article_number || "",
+      secret_code: prod.secret_code || "",
       brand: prod.brand || "",
       type: prod.type || "",
       size: prod.size !== undefined && prod.size !== null ? prod.size.toString() : "",
@@ -194,6 +197,10 @@ function Inventory() {
     e.preventDefault();
     if (!editForm.article_number.trim()) {
       setEditError("Article Number is required");
+      return;
+    }
+    if (!editForm.secret_code.trim()) {
+      setEditError("Secret Code is required");
       return;
     }
 
@@ -443,6 +450,7 @@ function Inventory() {
                   <th className="px-5 py-3.5">Product</th>
                   <th className="px-5 py-3.5 text-center">Size</th>
                   <th className="px-5 py-3.5">Color</th>
+                  <th className="px-5 py-3.5">Secret Code</th>
                   <th className="px-5 py-3.5 cursor-pointer hover:text-brand-accent transition-colors" onClick={() => requestSort("supplier_name")}>
                     Supplier {sortConfig.key === "supplier_name" && (sortConfig.direction === "asc" ? "▲" : "▼")}
                   </th>
@@ -461,6 +469,7 @@ function Inventory() {
                     <td className="px-5 py-3.5 text-[15px]">{prod.type}</td>
                     <td className="px-5 py-3.5 text-center text-[15px]">{prod.size}</td>
                     <td className="px-5 py-3.5 text-[15px]">{prod.color}</td>
+                    <td className="px-5 py-3.5 text-[15px] font-mono font-bold text-slate-800">{prod.secret_code || "-"}</td>
                     <td className="px-5 py-3.5 text-slate-500 text-[15px]">{prod.supplier_name || "-"}</td>
                     <td className="px-5 py-3.5 text-right text-[15px]">₹{Number(prod.purchase_price).toFixed(2)}</td>
                     <td className="px-5 py-3.5 text-right text-[15px]">₹{Number(prod.selling_price).toFixed(2)}</td>
@@ -517,17 +526,31 @@ function Inventory() {
                   </div>
                 )}
                 
-                <div>
-                  <label className="block text-[15px] font-bold uppercase tracking-wider text-brand-subtext mb-1">
-                    Article Number <span className="text-brand-danger">*</span>
-                  </label>
-                  <input
-                    type="text"
-                    value={editForm.article_number}
-                    onChange={(e) => setEditForm(prev => ({ ...prev, article_number: e.target.value }))}
-                    className="h-11 w-full rounded-xl border border-brand-border bg-white px-3.5 text-[16px] font-medium outline-none focus:border-brand-primary/60"
-                    required
-                  />
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-[15px] font-bold uppercase tracking-wider text-brand-subtext mb-1">
+                      Article Number <span className="text-brand-danger">*</span>
+                    </label>
+                    <input
+                      type="text"
+                      value={editForm.article_number}
+                      onChange={(e) => setEditForm(prev => ({ ...prev, article_number: e.target.value }))}
+                      className="h-11 w-full rounded-xl border border-brand-border bg-white px-3.5 text-[16px] font-medium outline-none focus:border-brand-primary/60 font-bold uppercase"
+                      required
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[15px] font-bold uppercase tracking-wider text-brand-subtext mb-1">
+                      Secret Code <span className="text-brand-danger">*</span>
+                    </label>
+                    <input
+                      type="text"
+                      value={editForm.secret_code}
+                      onChange={(e) => setEditForm(prev => ({ ...prev, secret_code: e.target.value }))}
+                      className="h-11 w-full rounded-xl border border-brand-border bg-white px-3.5 text-[16px] font-medium outline-none focus:border-brand-primary/60 font-bold"
+                      required
+                    />
+                  </div>
                 </div>
 
                 <div className="grid grid-cols-2 gap-3">

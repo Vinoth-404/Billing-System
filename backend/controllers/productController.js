@@ -102,14 +102,16 @@ exports.addOrUpdateStock = async (req, res) => {
     stock,
     supplier_name,
     article_number,
-    purchase_ref_no
+    purchase_ref_no,
+    secret_code
   } = req.body;
 
-  if (!brand || !type || !size || !color || purchase_price === undefined || selling_price === undefined || stock === undefined || !supplier_name || supplier_name.trim() === "") {
-    return res.status(400).json({ error: "Missing required fields (including Supplier Name)" });
+  if (!brand || !type || !size || !color || purchase_price === undefined || selling_price === undefined || stock === undefined || !supplier_name || supplier_name.trim() === "" || !secret_code || secret_code.trim() === "") {
+    return res.status(400).json({ error: "Missing required fields (including Secret Code and Supplier Name)" });
   }
 
   const stockVal = parseInt(stock);
+  const formattedSecretCode = secret_code.trim();
 
   try {
     // Check if same Brand + Type + Size + Color already exists in database
@@ -142,11 +144,12 @@ exports.addOrUpdateStock = async (req, res) => {
 
       const updateSql = `
         UPDATE products 
-        SET article_number = ?, purchase_price = ?, selling_price = ?, discount_percent = ?, stock = ?, supplier_name = ?
+        SET article_number = ?, secret_code = ?, purchase_price = ?, selling_price = ?, discount_percent = ?, stock = ?, supplier_name = ?
         WHERE id = ?
       `;
       const values = [
         finalArticleNumber,
+        formattedSecretCode,
         purchase_price,
         selling_price,
         discount_percent || 0,
@@ -231,8 +234,8 @@ exports.addOrUpdateStock = async (req, res) => {
       const serial_no = `SKU-${String(nextNum).padStart(3, '0')}`;
 
       const insertSql = `
-        INSERT INTO products (serial_no, brand, type, size, color, purchase_price, selling_price, discount_percent, stock, supplier_name, article_number)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO products (serial_no, brand, type, size, color, purchase_price, selling_price, discount_percent, stock, supplier_name, article_number, secret_code)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `;
       const values = [
         serial_no, 
@@ -245,7 +248,8 @@ exports.addOrUpdateStock = async (req, res) => {
         discount_percent || 0, 
         stockVal, 
         supplier_name || null, 
-        formattedArticleNumber
+        formattedArticleNumber,
+        formattedSecretCode
       ];
 
       console.log("Executing INSERT SQL query:", insertSql);
@@ -327,7 +331,7 @@ exports.getProductByArticleNumber = async (req, res) => {
   const { articleNumber } = req.params;
   try {
     const results = await query(
-      "SELECT id, article_number, brand, type, size, color, purchase_price, selling_price, stock, supplier_name AS supplier, discount_percent, barcode FROM products WHERE article_number = ? OR barcode = ?",
+      "SELECT id, article_number, brand, type, size, color, purchase_price, selling_price, stock, supplier_name AS supplier, discount_percent, barcode, secret_code FROM products WHERE article_number = ? OR barcode = ?",
       [articleNumber, articleNumber]
     );
     if (results.length === 0) {
@@ -351,10 +355,14 @@ exports.getProductByArticleNumber = async (req, res) => {
 // Edit product details (validate article number uniqueness)
 exports.editProduct = async (req, res) => {
   const { id } = req.params;
-  const { article_number, brand, type, size, color, purchase_price, selling_price, stock, supplier_name } = req.body;
+  const { article_number, secret_code, brand, type, size, color, purchase_price, selling_price, stock, supplier_name } = req.body;
 
   if (!article_number || article_number.trim() === "") {
     return res.status(400).json({ error: "Article Number is required." });
+  }
+
+  if (!secret_code || secret_code.trim() === "") {
+    return res.status(400).json({ error: "Secret Code is required." });
   }
 
   if (!supplier_name || supplier_name.trim() === "") {
@@ -362,6 +370,7 @@ exports.editProduct = async (req, res) => {
   }
 
   const formattedArticleNumber = article_number.trim().toUpperCase();
+  const formattedSecretCode = secret_code.trim();
 
   try {
     // 1. Check if another product already uses this article number
@@ -376,11 +385,12 @@ exports.editProduct = async (req, res) => {
     // 2. Update product
     const updateSql = `
       UPDATE products 
-      SET article_number = ?, brand = ?, type = ?, size = ?, color = ?, purchase_price = ?, selling_price = ?, stock = ?, supplier_name = ?
+      SET article_number = ?, secret_code = ?, brand = ?, type = ?, size = ?, color = ?, purchase_price = ?, selling_price = ?, stock = ?, supplier_name = ?
       WHERE id = ?
     `;
     const values = [
       formattedArticleNumber,
+      formattedSecretCode,
       brand,
       type,
       size,

@@ -54,6 +54,11 @@ async function runMigration() {
       await query("ALTER TABLE products ADD COLUMN barcode VARCHAR(100) DEFAULT NULL");
     }
 
+    if (!columnNames.includes("secret_code")) {
+      console.log("Adding 'secret_code' column to products table...");
+      await query("ALTER TABLE products ADD COLUMN secret_code VARCHAR(100) DEFAULT NULL");
+    }
+
     if (!columnNames.includes("barcode_generated_at")) {
       console.log("Adding 'barcode_generated_at' column to products table...");
       await query("ALTER TABLE products ADD COLUMN barcode_generated_at DATETIME DEFAULT NULL");
