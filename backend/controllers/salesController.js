@@ -1850,6 +1850,7 @@ exports.getPurchaseExportExcel = async (req, res) => {
       { header: "Supplier Name", key: "supplier_name" },
       { header: "Supplier Code", key: "supplier_code" },
       { header: "Article No", key: "article_number" },
+      { header: "Secret Code", key: "secret_code" },
       { header: "Brand", key: "brand" },
       { header: "Product Type", key: "type" },
       { header: "Size", key: "size" },
@@ -1883,23 +1884,25 @@ exports.getPurchaseExportExcel = async (req, res) => {
       row.getCell(3).value = rec.supplier_name || "-";
       row.getCell(4).value = rec.supplier_code || "-";
       row.getCell(5).value = rec.article_number || "-";
-      row.getCell(6).value = rec.brand || "-";
-      row.getCell(7).value = rec.type || "-";
-      row.getCell(8).value = rec.size !== undefined && rec.size !== null ? String(rec.size) : "-";
-      row.getCell(9).value = rec.color || "-";
-      row.getCell(10).value = Number(rec.quantity || 0);
-      row.getCell(11).value = Number(rec.purchase_price || 0);
-      row.getCell(12).value = Number(rec.total_value || 0);
+      row.getCell(6).value = rec.secret_code || "-";
+      row.getCell(7).value = rec.brand || "-";
+      row.getCell(8).value = rec.type || "-";
+      row.getCell(9).value = rec.size !== undefined && rec.size !== null ? String(rec.size) : "-";
+      row.getCell(10).value = rec.color || "-";
+      row.getCell(11).value = Number(rec.quantity || 0);
+      row.getCell(12).value = Number(rec.purchase_price || 0);
+      row.getCell(13).value = Number(rec.total_value || 0);
 
-      row.getCell(10).numFmt = "#,##0";
-      row.getCell(11).numFmt = '"₹"#,##0.00';
+      row.getCell(11).numFmt = "#,##0";
       row.getCell(12).numFmt = '"₹"#,##0.00';
+      row.getCell(13).numFmt = '"₹"#,##0.00';
 
       row.getCell(1).alignment = { horizontal: "center" };
       row.getCell(4).alignment = { horizontal: "center" };
-      row.getCell(8).alignment = { horizontal: "center" };
+      row.getCell(6).alignment = { horizontal: "center" };
       row.getCell(9).alignment = { horizontal: "center" };
       row.getCell(10).alignment = { horizontal: "center" };
+      row.getCell(11).alignment = { horizontal: "center" };
 
       columns.forEach((col, idx) => {
         const cell = row.getCell(idx + 1);
@@ -1923,12 +1926,12 @@ exports.getPurchaseExportExcel = async (req, res) => {
       cell.font = { name: "Arial", size: 10, bold: true };
     });
 
-    totalRow.getCell(10).value = { formula: `SUM(J${startDataRow}:J${endDataRow})` };
-    totalRow.getCell(10).numFmt = "#,##0";
-    totalRow.getCell(10).alignment = { horizontal: "center" };
+    totalRow.getCell(11).value = { formula: `SUM(K${startDataRow}:K${endDataRow})` };
+    totalRow.getCell(11).numFmt = "#,##0";
+    totalRow.getCell(11).alignment = { horizontal: "center" };
 
-    totalRow.getCell(12).value = { formula: `SUM(L${startDataRow}:L${endDataRow})` };
-    totalRow.getCell(12).numFmt = '"₹"#,##0.00';
+    totalRow.getCell(13).value = { formula: `SUM(M${startDataRow}:M${endDataRow})` };
+    totalRow.getCell(13).numFmt = '"₹"#,##0.00';
     totalRow.height = 22;
 
     // Auto-fit column widths

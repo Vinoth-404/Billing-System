@@ -273,7 +273,7 @@ async function runMigration() {
       )
     `);
 
-    // Ensure purchase_history has supplier_id and supplier_code columns
+    // Ensure purchase_history has supplier_id, supplier_code, and secret_code columns
     const phColumns = await query("SHOW COLUMNS FROM purchase_history");
     const phColNames = phColumns.map(c => c.Field);
     if (!phColNames.includes("supplier_id")) {
@@ -283,6 +283,11 @@ async function runMigration() {
     if (!phColNames.includes("supplier_code")) {
       console.log("Adding 'supplier_code' column to purchase_history table...");
       await query("ALTER TABLE purchase_history ADD COLUMN supplier_code VARCHAR(100) DEFAULT NULL");
+    }
+    if (!phColNames.includes("secret_code")) {
+      console.log("Adding 'secret_code' column to purchase_history table...");
+      await query("ALTER TABLE purchase_history ADD COLUMN secret_code VARCHAR(100) DEFAULT NULL");
+      await query("UPDATE purchase_history ph JOIN products p ON ph.product_id = p.id SET ph.secret_code = p.secret_code WHERE ph.secret_code IS NULL");
     }
 
     // Create index on sales.customer_phone for performance
@@ -563,7 +568,7 @@ async function runMigration() {
       }
     }
 
-    // Sync products.supplier_id with suppliers.id and products.secret_code with supplier_code
+    // Sync products.supplier_id with suppliers.id
     try {
       await query(`
         UPDATE products p
@@ -571,23 +576,23 @@ async function runMigration() {
         SET p.supplier_id = s.id
         WHERE p.supplier_id IS NULL OR p.supplier_id = 0
       `);
-      await query(`
-        UPDATE products p
-        JOIN suppliers s ON p.supplier_id = s.id
-        SET p.secret_code = s.supplier_code
-        WHERE p.secret_code IS NULL OR p.secret_code = ''
-      `);
     } catch (syncErr) {
       console.log("Error syncing products supplier_id:", syncErr.message);
     }
 
-    // Sync purchase_history.supplier_id and supplier_code
+    // Sync purchase_history.supplier_id and supplier_code, and secret_code
     try {
       await query(`
         UPDATE purchase_history ph
         JOIN suppliers s ON LOWER(TRIM(ph.supplier_name)) = LOWER(TRIM(s.name))
         SET ph.supplier_id = s.id, ph.supplier_code = s.supplier_code
         WHERE ph.supplier_id IS NULL OR ph.supplier_code IS NULL
+      `);
+      await query(`
+        UPDATE purchase_history ph
+        JOIN products p ON ph.product_id = p.id
+        SET ph.secret_code = p.secret_code
+        WHERE ph.secret_code IS NULL
       `);
     } catch (syncErr) {
       console.log("Error syncing purchase_history supplier_id:", syncErr.message);

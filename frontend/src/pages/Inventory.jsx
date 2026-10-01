@@ -185,7 +185,7 @@ function Inventory() {
     const supObj = filterOptions.suppliers?.find(
       (s) => (typeof s === "object" ? (s.name || s.supplier_name) : s) === prod.supplier_name || (typeof s === "object" && s.id === prod.supplier_id)
     );
-    const supCode = prod.supplier_code || prod.secret_code || (supObj ? (supObj.code || supObj.supplier_code) : "");
+    const supCode = prod.supplier_code || (supObj ? (supObj.code || supObj.supplier_code) : "");
     const supId = prod.supplier_id || (supObj ? supObj.id : "");
 
     setEditForm({
@@ -193,7 +193,7 @@ function Inventory() {
       supplier_id: supId,
       supplier_name: prod.supplier_name || "",
       supplier_code: supCode,
-      secret_code: supCode,
+      secret_code: prod.secret_code || "",
       brand: prod.brand || "",
       type: prod.type || "",
       size: prod.size !== undefined && prod.size !== null ? prod.size.toString() : "",
@@ -218,16 +218,14 @@ function Inventory() {
         ...prev,
         supplier_name: selectedName,
         supplier_id: supObj.id || "",
-        supplier_code: code,
-        secret_code: code
+        supplier_code: code
       }));
     } else {
       setEditForm(prev => ({
         ...prev,
         supplier_name: selectedName,
         supplier_id: "",
-        supplier_code: "",
-        secret_code: ""
+        supplier_code: ""
       }));
     }
   };
@@ -236,6 +234,10 @@ function Inventory() {
     e.preventDefault();
     if (!editForm.article_number.trim()) {
       setEditError("Article Number is required");
+      return;
+    }
+    if (!editForm.secret_code.trim()) {
+      setEditError("Secret Code is required");
       return;
     }
     if (!editForm.supplier_name) {
@@ -249,8 +251,10 @@ function Inventory() {
     const payload = {
       ...editForm,
       article_number: editForm.article_number.trim().toUpperCase(),
-      supplier_code: editForm.supplier_code || editForm.secret_code,
-      secret_code: editForm.supplier_code || editForm.secret_code
+      secret_code: editForm.secret_code.trim().toUpperCase(),
+      supplier_id: editForm.supplier_id || null,
+      supplier_name: editForm.supplier_name ? editForm.supplier_name.trim() : "",
+      supplier_code: editForm.supplier_code ? editForm.supplier_code.trim() : ""
     };
 
     axios
@@ -503,6 +507,7 @@ function Inventory() {
                     Supplier Name {sortConfig.key === "supplier_name" && (sortConfig.direction === "asc" ? "▲" : "▼")}
                   </th>
                   <th className="px-5 py-3.5">Supplier Code</th>
+                  <th className="px-5 py-3.5">Secret Code</th>
                   <th className="px-5 py-3.5 text-right">Purchase Price</th>
                   <th className="px-5 py-3.5 text-right">Selling Price</th>
                   <th className="px-5 py-3.5 text-center">Stock</th>
@@ -521,7 +526,12 @@ function Inventory() {
                     <td className="px-5 py-3.5 font-bold text-slate-800 text-[15px]">{prod.supplier_name || "-"}</td>
                     <td className="px-5 py-3.5 text-[15px]">
                       <span className="inline-block px-2.5 py-1 rounded-md bg-slate-100 font-mono font-bold text-slate-800 border border-slate-200">
-                        {prod.supplier_code || prod.secret_code || "-"}
+                        {prod.supplier_code || "-"}
+                      </span>
+                    </td>
+                    <td className="px-5 py-3.5 text-[15px]">
+                      <span className="inline-block px-2.5 py-1 rounded-md bg-blue-50 font-mono font-bold text-brand-accent border border-blue-200">
+                        {prod.secret_code || "-"}
                       </span>
                     </td>
                     <td className="px-5 py-3.5 text-right text-[15px]">₹{Number(prod.purchase_price).toFixed(2)}</td>
@@ -579,18 +589,34 @@ function Inventory() {
                   </div>
                 )}
                 
-                {/* Article Number */}
-                <div>
-                  <label className="block text-[15px] font-bold uppercase tracking-wider text-brand-subtext mb-1">
-                    Article Number <span className="text-brand-danger">*</span>
-                  </label>
-                  <input
-                    type="text"
-                    value={editForm.article_number}
-                    onChange={(e) => setEditForm(prev => ({ ...prev, article_number: e.target.value }))}
-                    className="h-11 w-full rounded-xl border border-brand-border bg-white px-3.5 text-[16px] font-medium outline-none focus:border-brand-primary/60 font-bold uppercase"
-                    required
-                  />
+                {/* Article Number & Secret Code */}
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-[15px] font-bold uppercase tracking-wider text-brand-subtext mb-1">
+                      Article Number <span className="text-brand-danger">*</span>
+                    </label>
+                    <input
+                      type="text"
+                      value={editForm.article_number}
+                      onChange={(e) => setEditForm(prev => ({ ...prev, article_number: e.target.value }))}
+                      className="h-11 w-full rounded-xl border border-brand-border bg-white px-3.5 text-[16px] font-medium outline-none focus:border-brand-primary/60 font-bold uppercase"
+                      required
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[15px] font-bold uppercase tracking-wider text-brand-subtext mb-1">
+                      Secret Code <span className="text-brand-danger">*</span>
+                    </label>
+                    <input
+                      type="text"
+                      value={editForm.secret_code}
+                      onChange={(e) => setEditForm(prev => ({ ...prev, secret_code: e.target.value }))}
+                      placeholder="e.g. IKP"
+                      className="h-11 w-full rounded-xl border border-brand-border bg-white px-3.5 text-[16px] font-mono font-bold outline-none focus:border-brand-primary/60 uppercase"
+                      required
+                    />
+                  </div>
                 </div>
 
                 {/* Supplier Selection and Code */}
@@ -629,11 +655,11 @@ function Inventory() {
 
                   <div>
                     <label className="block text-[15px] font-bold uppercase tracking-wider text-brand-subtext mb-1">
-                      Supplier Code
+                      Supplier Code <span className="text-[11px] font-normal text-slate-500 normal-case">(Read-Only)</span>
                     </label>
                     <input
                       type="text"
-                      value={editForm.supplier_code || editForm.secret_code || ""}
+                      value={editForm.supplier_code || ""}
                       readOnly
                       className="h-11 w-full rounded-xl border border-slate-200 bg-slate-100 px-3.5 text-[16px] font-mono font-bold text-slate-800 outline-none cursor-not-allowed select-none"
                     />

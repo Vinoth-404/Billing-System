@@ -227,7 +227,7 @@ function PurchaseHistory() {
       yPos += 4;
 
       const tableHeaders = [
-        ["Purchase Date", "Ref No", "Supplier Name", "Supplier Code", "Article No", "Brand", "Product Type", "Size", "Color", "Quantity", "Purchase Price (Rs.)", "Total Value (Rs.)"]
+        ["Purchase Date", "Ref No", "Supplier Name", "Supplier Code", "Article No", "Secret Code", "Brand", "Product Type", "Size", "Color", "Quantity", "Purchase Price (Rs.)", "Total Value (Rs.)"]
       ];
       
       const tableData = data.records.map(r => {
@@ -238,6 +238,7 @@ function PurchaseHistory() {
           r.supplier_name || "-",
           r.supplier_code || "-",
           r.article_number || "-",
+          r.secret_code || "-",
           r.brand || "-",
           r.type || "-",
           r.size !== undefined && r.size !== null ? String(r.size) : "-",
@@ -256,18 +257,19 @@ function PurchaseHistory() {
         headStyles: { fillColor: [30, 41, 59], textColor: 255, fontStyle: "bold", fontSize: 8 },
         bodyStyles: { fontSize: 7.5 },
         columnStyles: {
-          0: { cellWidth: 26, halign: "center" },
-          1: { cellWidth: 22 },
-          2: { cellWidth: 30 },
-          3: { cellWidth: 20, halign: "center" },
-          4: { cellWidth: 22 },
-          5: { cellWidth: 22 },
-          6: { cellWidth: 22 },
-          7: { cellWidth: 12, halign: "center" },
-          8: { cellWidth: 18, halign: "center" },
-          9: { cellWidth: 14, halign: "center" },
-          10: { cellWidth: 24, halign: "right" },
-          11: { cellWidth: 26, halign: "right" }
+          0: { cellWidth: 24, halign: "center" },
+          1: { cellWidth: 20 },
+          2: { cellWidth: 26 },
+          3: { cellWidth: 18, halign: "center" },
+          4: { cellWidth: 20 },
+          5: { cellWidth: 18, halign: "center" },
+          6: { cellWidth: 20 },
+          7: { cellWidth: 20 },
+          8: { cellWidth: 12, halign: "center" },
+          9: { cellWidth: 16, halign: "center" },
+          10: { cellWidth: 14, halign: "center" },
+          11: { cellWidth: 22, halign: "right" },
+          12: { cellWidth: 24, halign: "right" }
         },
         didDrawPage: (dataArg) => {
           const totalPages = doc.internal.getNumberOfPages();
@@ -442,6 +444,7 @@ function PurchaseHistory() {
                 <th className="px-5 py-4">Supplier Name</th>
                 <th className="px-5 py-4">Supplier Code</th>
                 <th className="px-5 py-4">Article No</th>
+                <th className="px-5 py-4">Secret Code</th>
                 <th className="px-5 py-4">Brand / Type</th>
                 <th className="px-5 py-4 text-center">Size / Color</th>
                 <th className="px-5 py-4 text-center">Qty Purchased</th>
@@ -452,13 +455,13 @@ function PurchaseHistory() {
             <tbody className="divide-y divide-slate-100 font-semibold text-brand-text">
               {loading ? (
                 <tr>
-                  <td colSpan="10" className="text-center py-8">
+                  <td colSpan="11" className="text-center py-8">
                     <div className="h-8 w-8 animate-spin rounded-full border-4 border-brand-primary border-t-transparent mx-auto"></div>
                   </td>
                 </tr>
               ) : records.length === 0 ? (
                 <tr>
-                  <td colSpan="10" className="text-center py-8 text-brand-subtext font-normal">
+                  <td colSpan="11" className="text-center py-8 text-brand-subtext font-normal">
                     No purchase logs found matching the filter criteria.
                   </td>
                 </tr>
@@ -479,6 +482,11 @@ function PurchaseHistory() {
                       </span>
                     </td>
                     <td className="px-5 py-4 font-bold text-xs uppercase text-slate-700">{r.article_number}</td>
+                    <td className="px-5 py-4">
+                      <span className="inline-block px-2.5 py-1 rounded-md bg-blue-50 font-mono font-bold text-brand-accent border border-blue-200 text-xs">
+                        {r.secret_code || "-"}
+                      </span>
+                    </td>
                     <td className="px-5 py-4 font-bold">{r.brand} {r.type}</td>
                     <td className="px-5 py-4 text-center text-xs">S-{r.size} / {r.color}</td>
                     <td className="px-5 py-4 text-slate-600 font-bold text-center">{r.quantity} pairs</td>

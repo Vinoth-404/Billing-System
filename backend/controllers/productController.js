@@ -24,7 +24,8 @@ exports.getProducts = async (req, res) => {
     const result = await query(`
       SELECT p.*, 
              COALESCE(s.name, p.supplier_name) AS supplier_name,
-             COALESCE(s.supplier_code, p.secret_code) AS supplier_code,
+             s.supplier_code AS supplier_code,
+             p.secret_code AS secret_code,
              p.supplier_id
       FROM products p
       LEFT JOIN suppliers s ON p.supplier_id = s.id
@@ -43,7 +44,8 @@ exports.getProductBySerial = async (req, res) => {
     const result = await query(`
       SELECT p.*, 
              COALESCE(s.name, p.supplier_name) AS supplier_name,
-             COALESCE(s.supplier_code, p.secret_code) AS supplier_code,
+             s.supplier_code AS supplier_code,
+             p.secret_code AS secret_code,
              p.supplier_id
       FROM products p
       LEFT JOIN suppliers s ON p.supplier_id = s.id
@@ -97,7 +99,8 @@ exports.getProductByAttributes = async (req, res) => {
     const result = await query(`
       SELECT p.*,
              COALESCE(s.name, p.supplier_name) AS supplier_name,
-             COALESCE(s.supplier_code, p.secret_code) AS supplier_code,
+             s.supplier_code AS supplier_code,
+             p.secret_code AS secret_code,
              p.supplier_id
       FROM products p
       LEFT JOIN suppliers s ON p.supplier_id = s.id
@@ -137,7 +140,8 @@ exports.addOrUpdateStock = async (req, res) => {
 
   let finalSupplierId = supplier_id ? parseInt(supplier_id) : null;
   let finalSupplierName = supplier_name ? supplier_name.trim() : "";
-  let finalSupplierCode = supplier_code ? supplier_code.trim() : (secret_code ? secret_code.trim() : "");
+  let finalSupplierCode = supplier_code ? supplier_code.trim() : "";
+  const finalSecretCode = secret_code ? secret_code.trim().toUpperCase() : "";
 
   // Resolve supplier details from database
   try {
@@ -145,25 +149,27 @@ exports.addOrUpdateStock = async (req, res) => {
       const sRows = await query("SELECT id, name, supplier_code FROM suppliers WHERE id = ?", [finalSupplierId]);
       if (sRows.length > 0) {
         finalSupplierName = sRows[0].name;
-        finalSupplierCode = sRows[0].supplier_code;
+        finalSupplierCode = sRows[0].supplier_code || "";
       }
     } else if (finalSupplierName) {
       const sRows = await query("SELECT id, name, supplier_code FROM suppliers WHERE LOWER(TRIM(name)) = LOWER(TRIM(?))", [finalSupplierName]);
       if (sRows.length > 0) {
         finalSupplierId = sRows[0].id;
-        finalSupplierCode = sRows[0].supplier_code;
+        finalSupplierCode = sRows[0].supplier_code || "";
       }
     }
   } catch (supErr) {
     console.error("Error looking up supplier for addOrUpdateStock:", supErr);
   }
 
-  if (!brand || !type || !size || !color || purchase_price === undefined || selling_price === undefined || stock === undefined || !finalSupplierName) {
-    return res.status(400).json({ error: "Missing required fields (including Supplier Name)" });
+  if (!brand || !type || !size || !color || purchase_price === undefined || selling_price === undefined || stock === undefined || !finalSupplierName || !finalSecretCode) {
+    return res.status(400).json({ error: "Please fill in all required fields (including Secret Code and Supplier Name)." });
   }
 
   const stockVal = parseInt(stock);
-  const formattedSecretCode = finalSupplierCode;
+  if (isNaN(stockVal) || stockVal <= 0) {
+    return res.status(400).json({ error: "Stock quantity must be a positive number." });
+  }
 
   try {
     // Check if same Brand + Type + Size + Color already exists in database
@@ -201,7 +207,7 @@ exports.addOrUpdateStock = async (req, res) => {
       `;
       const values = [
         finalArticleNumber,
-        formattedSecretCode,
+        finalSecretCode,
         purchase_price,
         selling_price,
         discount_percent || 0,
@@ -218,8 +224,8 @@ exports.addOrUpdateStock = async (req, res) => {
       // Log to purchase_history
       const purchaseRefNo = purchase_ref_no ? purchase_ref_no.trim() : `PO-${new Date().getFullYear()}-${Math.floor(1000 + Math.random() * 9000)}`;
       await query(
-        `INSERT INTO purchase_history (product_id, supplier_id, supplier_code, purchase_date, purchase_ref_no, supplier_name, article_number, brand, type, size, color, quantity, purchase_price, total_value)
-         VALUES (?, ?, ?, NOW(), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO purchase_history (product_id, supplier_id, supplier_code, purchase_date, purchase_ref_no, supplier_name, article_number, secret_code, brand, type, size, color, quantity, purchase_price, total_value)
+         VALUES (?, ?, ?, NOW(), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           existingProduct.id,
           finalSupplierId,
@@ -227,6 +233,7 @@ exports.addOrUpdateStock = async (req, res) => {
           purchaseRefNo,
           finalSupplierName,
           finalArticleNumber,
+          finalSecretCode,
           brand,
           type,
           size,
@@ -268,6 +275,7 @@ exports.addOrUpdateStock = async (req, res) => {
         product: { 
           ...existingProduct, 
           stock: newStock, 
+          secret_code: finalSecretCode,
           supplier_id: finalSupplierId, 
           supplier_name: finalSupplierName, 
           supplier_code: finalSupplierCode 
@@ -314,7 +322,7 @@ exports.addOrUpdateStock = async (req, res) => {
         finalSupplierId, 
         finalSupplierName, 
         formattedArticleNumber,
-        formattedSecretCode
+        finalSecretCode
       ];
 
       console.log("Executing INSERT SQL query:", insertSql);
@@ -332,8 +340,8 @@ exports.addOrUpdateStock = async (req, res) => {
       // Log to purchase_history
       const purchaseRefNo = purchase_ref_no ? purchase_ref_no.trim() : `PO-${new Date().getFullYear()}-${Math.floor(1000 + Math.random() * 9000)}`;
       await query(
-        `INSERT INTO purchase_history (product_id, supplier_id, supplier_code, purchase_date, purchase_ref_no, supplier_name, article_number, brand, type, size, color, quantity, purchase_price, total_value)
-         VALUES (?, ?, ?, NOW(), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO purchase_history (product_id, supplier_id, supplier_code, purchase_date, purchase_ref_no, supplier_name, article_number, secret_code, brand, type, size, color, quantity, purchase_price, total_value)
+         VALUES (?, ?, ?, NOW(), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           newId,
           finalSupplierId,
@@ -341,6 +349,7 @@ exports.addOrUpdateStock = async (req, res) => {
           purchaseRefNo,
           finalSupplierName,
           formattedArticleNumber,
+          finalSecretCode,
           brand,
           type,
           size,
@@ -362,7 +371,7 @@ exports.addOrUpdateStock = async (req, res) => {
         "INSERT INTO activity_log (type, message) VALUES ('addition', ?)",
         [`Added ${stockVal} ${brand} ${type}s (Supplier: ${finalSupplierName})`],
         (logErr) => {
-          if (logErr) console.error("Error writing product addition activity log:", logErr);
+          if (logErr) console.error("Error writing stock activity log:", logErr);
         }
       );
 
@@ -377,15 +386,19 @@ exports.addOrUpdateStock = async (req, res) => {
       );
 
       // Sync notifications alert
-      syncProductNotifications(newId, stockVal, brand, type, size, color)
-        .catch((syncErr) => console.error("Error syncing stock notifications:", syncErr));
+      try {
+        await syncProductNotifications(newId, stockVal, brand, type, size, color);
+      } catch (syncErr) {
+        console.error("Error syncing stock notifications:", syncErr);
+      }
 
-      res.status(201).json({ 
-        message: "Product created successfully", 
-        id: newId, 
-        serial_no, 
-        article_number: article_number.trim(),
+      res.status(201).json({
+        message: "Product created successfully",
+        id: newId,
+        serial_no,
+        article_number: formattedArticleNumber,
         barcode: generatedBarcode,
+        secret_code: finalSecretCode,
         supplier_id: finalSupplierId,
         supplier_name: finalSupplierName,
         supplier_code: finalSupplierCode
@@ -405,9 +418,9 @@ exports.getProductByArticleNumber = async (req, res) => {
               COALESCE(s.name, p.supplier_name) AS supplier,
               COALESCE(s.name, p.supplier_name) AS supplier_name,
               p.supplier_id,
-              COALESCE(s.supplier_code, p.secret_code) AS supplier_code,
-              p.discount_percent, p.barcode,
-              COALESCE(s.supplier_code, p.secret_code) AS secret_code
+              s.supplier_code AS supplier_code,
+              p.secret_code AS secret_code,
+              p.discount_percent, p.barcode
        FROM products p
        LEFT JOIN suppliers s ON p.supplier_id = s.id
        WHERE p.article_number = ? OR p.barcode = ?`,
@@ -451,20 +464,20 @@ exports.editProduct = async (req, res) => {
 
   let finalSupplierId = supplier_id ? parseInt(supplier_id) : null;
   let finalSupplierName = supplier_name ? supplier_name.trim() : "";
-  let finalSupplierCode = supplier_code ? supplier_code.trim() : (secret_code ? secret_code.trim() : "");
+  let finalSupplierCode = supplier_code ? supplier_code.trim() : "";
 
   try {
     if (finalSupplierId) {
       const sRows = await query("SELECT id, name, supplier_code FROM suppliers WHERE id = ?", [finalSupplierId]);
       if (sRows.length > 0) {
         finalSupplierName = sRows[0].name;
-        finalSupplierCode = sRows[0].supplier_code;
+        finalSupplierCode = sRows[0].supplier_code || "";
       }
     } else if (finalSupplierName) {
       const sRows = await query("SELECT id, name, supplier_code FROM suppliers WHERE LOWER(TRIM(name)) = LOWER(TRIM(?))", [finalSupplierName]);
       if (sRows.length > 0) {
         finalSupplierId = sRows[0].id;
-        finalSupplierCode = sRows[0].supplier_code;
+        finalSupplierCode = sRows[0].supplier_code || "";
       }
     }
   } catch (sErr) {
@@ -475,12 +488,16 @@ exports.editProduct = async (req, res) => {
     return res.status(400).json({ error: "Article Number is required." });
   }
 
+  if (!secret_code || secret_code.trim() === "") {
+    return res.status(400).json({ error: "Secret Code is required." });
+  }
+
   if (!finalSupplierName) {
     return res.status(400).json({ error: "Supplier Name is required." });
   }
 
   const formattedArticleNumber = article_number.trim().toUpperCase();
-  const formattedSecretCode = finalSupplierCode || (secret_code ? secret_code.trim() : "");
+  const formattedSecretCode = secret_code.trim().toUpperCase();
 
   try {
     // 1. Check if another product already uses this article number
@@ -515,17 +532,8 @@ exports.editProduct = async (req, res) => {
 
     await query(updateSql, values);
     
-    // Log to activity_log
-    db.query(
-      "INSERT INTO activity_log (type, message) VALUES ('edit', ?)",
-      [`Updated product ${brand} ${type} (Supplier: ${finalSupplierName})`],
-      (logErr) => {
-        if (logErr) console.error("Error writing product edit activity log:", logErr);
-      }
-    );
-    
     // Check if we should update references in sale_items (Cascade)
-    await query("UPDATE sale_items SET article_number = ? WHERE product_id = ?", [article_number.trim(), id]);
+    await query("UPDATE sale_items SET article_number = ? WHERE product_id = ?", [formattedArticleNumber, id]);
 
     res.json({ message: "Product updated successfully." });
   } catch (err) {
@@ -693,7 +701,7 @@ exports.editMasterItem = async (req, res) => {
       await query("UPDATE suppliers SET name = ?, supplier_code = ? WHERE id = ?", [finalName, finalCode, id]);
 
       // Cascade update to products and purchase_history
-      await query("UPDATE products SET supplier_name = ?, secret_code = ? WHERE supplier_id = ? OR supplier_name = ?", [finalName, finalCode, id, oldSupplier.name]);
+      await query("UPDATE products SET supplier_name = ? WHERE supplier_id = ? OR supplier_name = ?", [finalName, id, oldSupplier.name]);
       await query("UPDATE purchase_history SET supplier_name = ?, supplier_code = ? WHERE supplier_id = ? OR supplier_name = ?", [finalName, finalCode, id, oldSupplier.name]);
 
       return res.json({
@@ -1275,8 +1283,45 @@ exports.getProductByBarcode = async (req, res) => {
   const { barcode } = req.params;
   try {
     const results = await query(
-      "SELECT id, serial_no, serial_no AS sku, article_number, brand, type, size, color, purchase_price, selling_price, discount_percent, stock, supplier_name, supplier_name AS supplier, barcode FROM products WHERE barcode = ? OR article_number = ?",
-      [barcode, barcode]
+      `SELECT p.id, p.serial_no, p.serial_no AS sku, p.article_number, p.brand, p.type, p.size, p.color,
+              p.purchase_price, p.selling_price, p.discount_percent, p.stock,
+              p.secret_code,
+              COALESCE(s.name, p.supplier_name) AS supplier_name,
+              s.supplier_code AS supplier_code,
+              p.barcode
+       FROM products p
+       LEFT JOIN suppliers s ON p.supplier_id = s.id
+       WHERE p.barcode = ? OR p.article_number = ?
+       ORDER BY p.created_at DESC
+       LIMIT 1`,
+      [barcode.trim(), barcode.trim()]
+    );
+    if (results.length === 0) {
+      return res.status(404).json({ error: "Product not found." });
+    }
+    res.json(results[0]);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};
+
+// GET /api/products/article/:articleNumber
+exports.getProductByArticleNumber = async (req, res) => {
+  const { articleNumber } = req.params;
+  try {
+    const results = await query(
+      `SELECT p.id, p.serial_no, p.serial_no AS sku, p.article_number, p.brand, p.type, p.size, p.color,
+              p.purchase_price, p.selling_price, p.discount_percent, p.stock,
+              p.secret_code,
+              COALESCE(s.name, p.supplier_name) AS supplier_name,
+              s.supplier_code AS supplier_code,
+              p.barcode
+       FROM products p
+       LEFT JOIN suppliers s ON p.supplier_id = s.id
+       WHERE p.article_number = ? OR p.serial_no = ?
+       ORDER BY p.created_at DESC
+       LIMIT 1`,
+      [articleNumber.trim(), articleNumber.trim()]
     );
     if (results.length === 0) {
       return res.status(404).json({ error: "Product not found." });
@@ -1312,7 +1357,15 @@ exports.printBarcode = async (req, res) => {
   const { id } = req.params;
   const { copies = 1 } = req.body;
   try {
-    const prod = await query("SELECT * FROM products WHERE id = ?", [id]);
+    const prod = await query(`
+      SELECT p.*,
+             COALESCE(s.name, p.supplier_name) AS supplier_name,
+             s.supplier_code AS supplier_code,
+             p.secret_code AS secret_code
+      FROM products p
+      LEFT JOIN suppliers s ON p.supplier_id = s.id
+      WHERE p.id = ?
+    `, [id]);
     if (prod.length === 0) {
       return res.status(404).json({ error: "Product not found." });
     }
@@ -1338,7 +1391,15 @@ exports.printAllBarcodes = async (req, res) => {
     const list = products || [];
     const results = [];
     for (const item of list) {
-      const prod = await query("SELECT * FROM products WHERE id = ?", [item.id]);
+      const prod = await query(`
+        SELECT p.*,
+               COALESCE(s.name, p.supplier_name) AS supplier_name,
+               s.supplier_code AS supplier_code,
+               p.secret_code AS secret_code
+        FROM products p
+        LEFT JOIN suppliers s ON p.supplier_id = s.id
+        WHERE p.id = ?
+      `, [item.id]);
       if (prod.length > 0) {
         const p = prod[0];
         if (p.barcode) {

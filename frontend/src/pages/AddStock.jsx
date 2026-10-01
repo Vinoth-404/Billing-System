@@ -62,8 +62,7 @@ function AddStock() {
                 ...prev,
                 supplier_name: selectNewValue,
                 supplier_id: extraData.id || prev.supplier_id,
-                supplier_code: extraData.supplier_code || extraData.code || prev.supplier_code,
-                secret_code: extraData.supplier_code || extraData.code || prev.secret_code
+                supplier_code: extraData.supplier_code || extraData.code || prev.supplier_code
               }));
             } else {
               setFormData(prev => ({
@@ -93,8 +92,9 @@ function AddStock() {
               const supObj = filterOptions.suppliers?.find(
                 (s) => (typeof s === "object" ? (s.name || s.supplier_name) : s) === matchedSupplierName || (typeof s === "object" && s.id === res.data.supplier_id)
               );
-              const supCode = res.data.supplier_code || res.data.secret_code || (supObj ? (supObj.code || supObj.supplier_code) : "");
+              const supCode = res.data.supplier_code || (supObj ? (supObj.code || supObj.supplier_code) : "");
               const supId = res.data.supplier_id || (supObj ? supObj.id : "");
+              const secCode = res.data.secret_code || "";
 
               setFormData((prev) => ({
                 ...prev,
@@ -105,7 +105,7 @@ function AddStock() {
                 supplier_id: supId,
                 supplier_name: matchedSupplierName || (supObj ? (supObj.name || supObj.supplier_name) : prev.supplier_name),
                 supplier_code: supCode || prev.supplier_code,
-                secret_code: supCode || prev.secret_code,
+                secret_code: prev.secret_code || secCode,
                 article_number: res.data.article_number || prev.article_number || "",
                 stock: ""
               }));
@@ -162,8 +162,7 @@ function AddStock() {
         ...prev,
         supplier_name: "",
         supplier_id: "",
-        supplier_code: "",
-        secret_code: ""
+        supplier_code: ""
       }));
       return;
     }
@@ -179,16 +178,14 @@ function AddStock() {
         ...prev,
         supplier_name: selectedName,
         supplier_id: id,
-        supplier_code: code,
-        secret_code: code
+        supplier_code: code
       }));
     } else {
       setFormData((prev) => ({
         ...prev,
         supplier_name: selectedName,
         supplier_id: "",
-        supplier_code: "",
-        secret_code: ""
+        supplier_code: ""
       }));
     }
   };
@@ -205,15 +202,15 @@ function AddStock() {
     const payload = {
       ...formData,
       article_number: formData.article_number ? formData.article_number.trim().toUpperCase() : "",
+      secret_code: formData.secret_code ? formData.secret_code.trim().toUpperCase() : "",
       supplier_id: formData.supplier_id || null,
       supplier_name: formData.supplier_name ? formData.supplier_name.trim() : "",
-      supplier_code: formData.supplier_code ? formData.supplier_code.trim() : "",
-      secret_code: formData.supplier_code ? formData.supplier_code.trim() : (formData.secret_code ? formData.secret_code.trim() : "")
+      supplier_code: formData.supplier_code ? formData.supplier_code.trim() : ""
     };
 
     // Validations
-    if (!payload.article_number || !payload.supplier_name || !payload.brand || !payload.type || !payload.size || !payload.color || !payload.purchase_price || !payload.selling_price || !payload.stock) {
-      setAlert({ type: "danger", message: "Please fill in all required fields." });
+    if (!payload.article_number || !payload.secret_code || !payload.supplier_name || !payload.brand || !payload.type || !payload.size || !payload.color || !payload.purchase_price || !payload.selling_price || !payload.stock) {
+      setAlert({ type: "danger", message: "Please fill in all required fields (including Article Number, Secret Code, and Supplier Name)." });
       return;
     }
 
@@ -353,7 +350,7 @@ function AddStock() {
             </div>
           )}
 
-          {/* Article Number & Purchase Reference Row */}
+          {/* Row 1: Article Number & Secret Code */}
           <div className="grid gap-5 md:grid-cols-2">
             <div>
               <label className="block text-[15px] font-bold uppercase tracking-wider text-brand-subtext mb-2">
@@ -365,27 +362,31 @@ function AddStock() {
                 value={formData.article_number}
                 onChange={handleInputChange}
                 placeholder="e.g. 5-3841"
-                className="h-12 w-full rounded-xl border border-brand-border bg-white px-4 text-[16px] placeholder:text-[15px] font-medium outline-none focus:border-brand-primary/60 focus:ring-2 focus:ring-brand-primary/10 disabled:bg-slate-50 disabled:text-slate-500 font-bold uppercase"
+                className="h-12 w-full rounded-xl border border-brand-border bg-white px-4 text-[16px] placeholder:text-[15px] font-bold uppercase outline-none focus:border-brand-primary/60 focus:ring-2 focus:ring-brand-primary/10"
                 required
               />
             </div>
 
             <div>
               <label className="block text-[15px] font-bold uppercase tracking-wider text-brand-subtext mb-2">
-                Purchase Reference Number
+                Secret Code <span className="text-brand-danger">*</span>
               </label>
               <input
                 type="text"
-                name="purchase_ref_no"
-                value={formData.purchase_ref_no}
+                name="secret_code"
+                value={formData.secret_code}
                 onChange={handleInputChange}
-                placeholder="Auto-generated if left blank"
-                className="h-12 w-full rounded-xl border border-brand-border bg-white px-4 text-[16px] placeholder:text-[15px] font-bold outline-none focus:border-brand-primary/60 focus:ring-2 focus:ring-brand-primary/10 uppercase"
+                placeholder="e.g. IKP (manually entered)"
+                className="h-12 w-full rounded-xl border border-brand-border bg-white px-4 text-[16px] placeholder:text-[15px] font-mono font-bold uppercase outline-none focus:border-brand-primary/60 focus:ring-2 focus:ring-brand-primary/10"
+                required
               />
+              <p className="text-[12px] font-medium text-brand-subtext mt-1">
+                Product secret code printed on barcode labels (separate from supplier code).
+              </p>
             </div>
           </div>
 
-          {/* Supplier Selection Row (Dropdown + Auto-populated Read-Only Code) */}
+          {/* Row 2: Supplier Selection (Dropdown + Auto-populated Read-Only Code) */}
           <div className="grid gap-5 md:grid-cols-2">
             <div>
               <div className="flex items-center justify-between mb-2">
@@ -422,7 +423,7 @@ function AddStock() {
 
             <div>
               <label className="block text-[15px] font-bold uppercase tracking-wider text-brand-subtext mb-2">
-                Supplier Code
+                Supplier Code <span className="text-[12px] font-normal text-slate-500 normal-case">(Read-Only)</span>
               </label>
               <div className="relative">
                 <input
@@ -442,7 +443,7 @@ function AddStock() {
             </div>
           </div>
 
-          {/* Product Specifications Row */}
+          {/* Row 3: Product Specifications */}
           <div className="grid gap-5 md:grid-cols-2">
             <div>
               <div className="flex items-center justify-between mb-2">
@@ -499,7 +500,7 @@ function AddStock() {
             </div>
           </div>
 
-          {/* Variant Specifications Row */}
+          {/* Row 4: Variant Specifications */}
           <div className="grid gap-5 md:grid-cols-2">
             <div>
               <div className="flex items-center justify-between mb-2">
@@ -570,7 +571,7 @@ function AddStock() {
             </div>
           )}
 
-          {/* Financial Details Row */}
+          {/* Row 5: Financial Details */}
           <div className="grid gap-5 md:grid-cols-2">
             <div>
               <label className="block text-[15px] font-bold uppercase tracking-wider text-brand-subtext mb-2">
@@ -603,7 +604,7 @@ function AddStock() {
             </div>
           </div>
 
-          {/* Inventory Quantity Row */}
+          {/* Row 6: Inventory Quantity & Purchase Reference */}
           <div className="grid gap-5 md:grid-cols-2">
             <div>
               <label className="block text-[15px] font-bold uppercase tracking-wider text-brand-subtext mb-2">
@@ -617,6 +618,20 @@ function AddStock() {
                 placeholder={isExisting ? "e.g. 15 (adds to catalog)" : "Initial stock"}
                 className="h-12 w-full rounded-xl border border-brand-border bg-white px-4 text-[16px] placeholder:text-[15px] font-medium outline-none focus:border-brand-primary/60 focus:ring-2 focus:ring-brand-primary/10"
                 required
+              />
+            </div>
+
+            <div>
+              <label className="block text-[15px] font-bold uppercase tracking-wider text-brand-subtext mb-2">
+                Purchase Reference Number
+              </label>
+              <input
+                type="text"
+                name="purchase_ref_no"
+                value={formData.purchase_ref_no}
+                onChange={handleInputChange}
+                placeholder="Auto-generated if left blank"
+                className="h-12 w-full rounded-xl border border-brand-border bg-white px-4 text-[16px] placeholder:text-[15px] font-bold outline-none focus:border-brand-primary/60 focus:ring-2 focus:ring-brand-primary/10 uppercase"
               />
             </div>
           </div>
