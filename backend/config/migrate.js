@@ -44,6 +44,11 @@ async function runMigration() {
       await query("ALTER TABLE products ADD COLUMN supplier_name VARCHAR(100) DEFAULT NULL");
     }
 
+    if (!columnNames.includes("supplier_id")) {
+      console.log("Adding 'supplier_id' column to products table...");
+      await query("ALTER TABLE products ADD COLUMN supplier_id INT DEFAULT NULL");
+    }
+
     if (!columnNames.includes("article_number")) {
       console.log("Adding 'article_number' column to products table...");
       await query("ALTER TABLE products ADD COLUMN article_number VARCHAR(100) DEFAULT NULL");
@@ -250,6 +255,8 @@ async function runMigration() {
       CREATE TABLE IF NOT EXISTS purchase_history (
         id INT AUTO_INCREMENT PRIMARY KEY,
         product_id INT NOT NULL,
+        supplier_id INT DEFAULT NULL,
+        supplier_code VARCHAR(100) DEFAULT NULL,
         purchase_date DATETIME NOT NULL,
         purchase_ref_no VARCHAR(100) NOT NULL,
         supplier_name VARCHAR(100) NOT NULL,
@@ -265,6 +272,18 @@ async function runMigration() {
         FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE CASCADE
       )
     `);
+
+    // Ensure purchase_history has supplier_id and supplier_code columns
+    const phColumns = await query("SHOW COLUMNS FROM purchase_history");
+    const phColNames = phColumns.map(c => c.Field);
+    if (!phColNames.includes("supplier_id")) {
+      console.log("Adding 'supplier_id' column to purchase_history table...");
+      await query("ALTER TABLE purchase_history ADD COLUMN supplier_id INT DEFAULT NULL");
+    }
+    if (!phColNames.includes("supplier_code")) {
+      console.log("Adding 'supplier_code' column to purchase_history table...");
+      await query("ALTER TABLE purchase_history ADD COLUMN supplier_code VARCHAR(100) DEFAULT NULL");
+    }
 
     // Create index on sales.customer_phone for performance
     try {
@@ -455,9 +474,24 @@ async function runMigration() {
     await query(`
       CREATE TABLE IF NOT EXISTS suppliers (
         id INT AUTO_INCREMENT PRIMARY KEY,
-        name VARCHAR(100) UNIQUE NOT NULL
+        name VARCHAR(100) UNIQUE NOT NULL,
+        supplier_code VARCHAR(100) DEFAULT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       )
     `);
+
+    // Ensure suppliers table has supplier_code column
+    const supplierColumns = await query("SHOW COLUMNS FROM suppliers");
+    const supplierColumnNames = supplierColumns.map(c => c.Field);
+    if (!supplierColumnNames.includes("supplier_code")) {
+      console.log("Adding 'supplier_code' column to suppliers table...");
+      await query("ALTER TABLE suppliers ADD COLUMN supplier_code VARCHAR(100) DEFAULT NULL");
+    }
+
+    if (!supplierColumnNames.includes("created_at")) {
+      console.log("Adding 'created_at' column to suppliers table...");
+      await query("ALTER TABLE suppliers ADD COLUMN created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP");
+    }
 
     // Migrate existing supplier_name values from products into suppliers table
     try {
@@ -466,7 +500,7 @@ async function runMigration() {
         await query("INSERT IGNORE INTO suppliers (name) VALUES (?)", [row.supplier_name.trim()]);
       }
     } catch (migErr) {
-      console.log("Note: Could not migrate supplier names because products table is not populated yet or columns missing:", migErr.message);
+      console.log("Note: Could not migrate supplier names:", migErr.message);
     }
 
     // Seed default suppliers if empty
@@ -474,43 +508,89 @@ async function runMigration() {
     const supplierCheck = await query("SELECT COUNT(*) AS count FROM suppliers");
     if (supplierCheck[0].count === 0) {
       await query(`
-        INSERT INTO suppliers (name) VALUES 
-        ('Nike India Distributors'), 
-        ('Crocs Retail Private Ltd'), 
-        ('Bata Wholesale Hub'), 
-        ('Relaxo Footwears Depot'), 
-        ('Paragon Distributors Ltd'), 
-        ('Puma Sports Logistics'), 
-        ('Adidas India Ltd')
+        INSERT INTO suppliers (name, supplier_code) VALUES 
+        ('Nike India Distributors', 'NIKE01'), 
+        ('Crocs Retail Private Ltd', 'CROC01'), 
+        ('Bata Wholesale Hub', 'BAT123'), 
+        ('Relaxo Footwears Depot', 'REL01'), 
+        ('Paragon Distributors Ltd', 'PARA01'), 
+        ('Puma Sports Logistics', 'PUMA01'), 
+        ('Adidas India Ltd', 'ADID01'),
+        ('BINUTOP LEATHERWARE', 'IKP')
       `);
     }
 
-    // Add foreign key constraint to products.supplier_name referencing suppliers.name
-    try {
-      const checkFk = await query(`
-        SELECT CONSTRAINT_NAME 
-        FROM information_schema.TABLE_CONSTRAINTS 
-        WHERE CONSTRAINT_SCHEMA = DATABASE() 
-          AND TABLE_NAME = 'products' 
-          AND CONSTRAINT_NAME = 'fk_products_supplier'
-      `);
-      
-      if (checkFk.length === 0) {
-        console.log("Adding foreign key relationship from products.supplier_name to suppliers.name...");
-        // Clear any empty string values to NULL first to prevent key constraint issues
-        await query("UPDATE products SET supplier_name = NULL WHERE supplier_name = ''");
-        
-        await query(`
-          ALTER TABLE products 
-          ADD CONSTRAINT fk_products_supplier 
-          FOREIGN KEY (supplier_name) 
-          REFERENCES suppliers(name) 
-          ON UPDATE CASCADE 
-          ON DELETE RESTRICT
-        `);
+    // Ensure all existing suppliers have a unique supplier_code
+    const defaultCodes = {
+      "BINUTOP LEATHERWARE": "IKP",
+      "Binutop Leatherware": "IKP",
+      "Bata Wholesale Hub": "BAT123",
+      "Bata Wholesale": "BAT123",
+      "Adidas India Ltd": "ADID01",
+      "Nike India Distributors": "NIKE01",
+      "Crocs Retail Private Ltd": "CROC01",
+      "Paragon Distributors Ltd": "PARA01",
+      "Puma Sports Logistics": "PUMA01",
+      "Relaxo Footwears Depot": "REL01"
+    };
+
+    const allSuppliers = await query("SELECT id, name, supplier_code FROM suppliers");
+    const usedCodes = new Set(allSuppliers.map(s => s.supplier_code).filter(Boolean));
+
+    for (const sup of allSuppliers) {
+      if (!sup.supplier_code || sup.supplier_code.trim() === "") {
+        let code = defaultCodes[sup.name] || defaultCodes[sup.name.trim()];
+        if (!code || usedCodes.has(code)) {
+          const clean = sup.name.replace(/[^A-Za-z0-9]/g, "").toUpperCase();
+          const prefix = clean.length >= 3 ? clean.substring(0, 4) : "SUP";
+          code = `${prefix}${sup.id}`;
+        }
+        while (usedCodes.has(code)) {
+          code = `SUP${sup.id}_${Math.floor(100 + Math.random() * 900)}`;
+        }
+        usedCodes.add(code);
+        await query("UPDATE suppliers SET supplier_code = ? WHERE id = ?", [code, sup.id]);
+        console.log(`Assigned supplier_code '${code}' to supplier '${sup.name}'`);
       }
-    } catch (fkErr) {
-      console.log("Could not add foreign key constraint on products (may not exist yet or conflict):", fkErr.message);
+    }
+
+    // Add unique index on suppliers(supplier_code)
+    try {
+      await query("CREATE UNIQUE INDEX idx_supplier_code ON suppliers (supplier_code)");
+    } catch (indexErr) {
+      if (indexErr.code !== 'ER_DUP_KEYNAME') {
+        console.error("Error creating idx_supplier_code:", indexErr);
+      }
+    }
+
+    // Sync products.supplier_id with suppliers.id and products.secret_code with supplier_code
+    try {
+      await query(`
+        UPDATE products p
+        JOIN suppliers s ON LOWER(TRIM(p.supplier_name)) = LOWER(TRIM(s.name))
+        SET p.supplier_id = s.id
+        WHERE p.supplier_id IS NULL OR p.supplier_id = 0
+      `);
+      await query(`
+        UPDATE products p
+        JOIN suppliers s ON p.supplier_id = s.id
+        SET p.secret_code = s.supplier_code
+        WHERE p.secret_code IS NULL OR p.secret_code = ''
+      `);
+    } catch (syncErr) {
+      console.log("Error syncing products supplier_id:", syncErr.message);
+    }
+
+    // Sync purchase_history.supplier_id and supplier_code
+    try {
+      await query(`
+        UPDATE purchase_history ph
+        JOIN suppliers s ON LOWER(TRIM(ph.supplier_name)) = LOWER(TRIM(s.name))
+        SET ph.supplier_id = s.id, ph.supplier_code = s.supplier_code
+        WHERE ph.supplier_id IS NULL OR ph.supplier_code IS NULL
+      `);
+    } catch (syncErr) {
+      console.log("Error syncing purchase_history supplier_id:", syncErr.message);
     }
 
     // 5. Insert sample products if empty (or only 1 product)

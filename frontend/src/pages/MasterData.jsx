@@ -45,9 +45,10 @@ function MasterData() {
   // Modal State
   const [showModal, setShowModal] = useState(false);
   const [modalMode, setModalMode] = useState("add"); // "add" or "edit"
-  const [modalCategory, setModalCategory] = useState(""); // "brands", "types", "sizes", "colors"
+  const [modalCategory, setModalCategory] = useState(""); // "brands", "types", "sizes", "colors", "suppliers", "expense_categories"
   const [selectedItem, setSelectedItem] = useState(null);
   const [itemNameInput, setItemNameInput] = useState("");
+  const [supplierCodeInput, setSupplierCodeInput] = useState("");
   const [modalError, setModalError] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
@@ -90,7 +91,7 @@ function MasterData() {
     if (cat === "types") return { name: "Product Types", label: "Product Type", placeholder: "e.g. Sandals, Clogs" };
     if (cat === "sizes") return { name: "Sizes", label: "Size (UK/US)", placeholder: "e.g. 8, 9, 10" };
     if (cat === "colors") return { name: "Colors", label: "Color Name", placeholder: "e.g. Cherry Red, Blue" };
-    if (cat === "suppliers") return { name: "Suppliers", label: "Supplier Name", placeholder: "e.g. Adidas India Ltd, Bata Wholesale Hub" };
+    if (cat === "suppliers") return { name: "Suppliers", label: "Supplier Name", placeholder: "e.g. Binutop Leatherware, Bata Wholesale" };
     if (cat === "expense_categories") return { name: "Expense Categories", label: "Expense Category Name", placeholder: "e.g. Food & Tea, Travel" };
     return { name: "", label: "", placeholder: "" };
   };
@@ -100,6 +101,7 @@ function MasterData() {
     setModalCategory(cat);
     setSelectedItem(null);
     setItemNameInput("");
+    setSupplierCodeInput("");
     setModalError("");
     setShowModal(true);
   };
@@ -108,7 +110,8 @@ function MasterData() {
     setModalMode("edit");
     setModalCategory(cat);
     setSelectedItem(item);
-    setItemNameInput(item.name);
+    setItemNameInput(item.name || "");
+    setSupplierCodeInput(item.supplier_code || item.code || "");
     setModalError("");
     setShowModal(true);
   };
@@ -120,6 +123,11 @@ function MasterData() {
       return;
     }
 
+    if (modalCategory === "suppliers" && !supplierCodeInput.trim()) {
+      setModalError("Supplier Code cannot be empty");
+      return;
+    }
+
     setSubmitting(true);
     setModalError("");
 
@@ -127,9 +135,18 @@ function MasterData() {
       ? `${API}/api/master/${modalCategory}`
       : `${API}/api/master/${modalCategory}/${selectedItem.id}`;
     
+    const payload = modalCategory === "suppliers"
+      ? { 
+          name: itemNameInput.trim(), 
+          supplier_name: itemNameInput.trim(), 
+          code: supplierCodeInput.trim(), 
+          supplier_code: supplierCodeInput.trim() 
+        }
+      : { name: itemNameInput.trim() };
+
     const request = modalMode === "add"
-      ? axios.post(url, { name: itemNameInput.trim() })
-      : axios.put(url, { name: itemNameInput.trim() });
+      ? axios.post(url, payload)
+      : axios.put(url, payload);
 
     request
       .then(() => {
@@ -214,7 +231,10 @@ function MasterData() {
   const filteredTypes = types.filter(t => t.name.toLowerCase().includes(searchTypes.toLowerCase()));
   const filteredSizes = sizes.filter(s => s.name.toLowerCase().includes(searchSizes.toLowerCase()));
   const filteredColors = colors.filter(c => c.name.toLowerCase().includes(searchColors.toLowerCase()));
-  const filteredSuppliers = suppliers.filter(s => s.name.toLowerCase().includes(searchSuppliers.toLowerCase()));
+  const filteredSuppliers = suppliers.filter(s => 
+    (s.name || "").toLowerCase().includes(searchSuppliers.toLowerCase()) || 
+    (s.supplier_code || s.code || "").toLowerCase().includes(searchSuppliers.toLowerCase())
+  );
   const filteredExpenseCategories = expenseCategories.filter(ec => ec.name.toLowerCase().includes(searchExpenseCategories.toLowerCase()));
 
   const activeCategory = getCategoryDetails(modalCategory);
@@ -317,7 +337,7 @@ function MasterData() {
         </form>
       </div>
 
-      {/* Main Grid displaying all four categories simultaneously */}
+      {/* Main Grid displaying all categories */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
         
         {/* SECTION 1: BRANDS */}
@@ -463,7 +483,7 @@ function MasterData() {
             <table className="w-full text-left text-[15px]">
               <thead>
                 <tr className="border-b border-brand-border/60 bg-slate-50 text-[16px] font-semibold uppercase tracking-wider text-brand-subtext">
-                  <th className="px-5 py-3">Size</th>
+                  <th className="px-5 py-3">Size (UK/US)</th>
                   <th className="px-5 py-3 text-right">Action</th>
                 </tr>
               </thead>
@@ -525,7 +545,7 @@ function MasterData() {
             <table className="w-full text-left text-[15px]">
               <thead>
                 <tr className="border-b border-brand-border/60 bg-slate-50 text-[16px] font-semibold uppercase tracking-wider text-brand-subtext">
-                  <th className="px-5 py-3">Color</th>
+                  <th className="px-5 py-3">Color Name</th>
                   <th className="px-5 py-3 text-right">Action</th>
                 </tr>
               </thead>
@@ -639,7 +659,7 @@ function MasterData() {
             </span>
             <input
               type="text"
-              placeholder="Search suppliers..."
+              placeholder="Search suppliers by name or code..."
               value={searchSuppliers}
               onChange={(e) => setSearchSuppliers(e.target.value)}
               className="h-11 w-full rounded-xl border border-brand-border bg-white pl-10 pr-3 text-[16px] placeholder:text-[15px] font-medium outline-none focus:border-brand-primary/60"
@@ -650,18 +670,20 @@ function MasterData() {
               <thead>
                 <tr className="border-b border-brand-border/60 bg-slate-50 text-[16px] font-semibold uppercase tracking-wider text-brand-subtext">
                   <th className="px-5 py-3">Supplier Name</th>
+                  <th className="px-5 py-3">Supplier Code</th>
                   <th className="px-5 py-3 text-right">Action</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 font-medium text-brand-text">
                 {filteredSuppliers.length === 0 ? (
                   <tr>
-                    <td colSpan="2" className="px-5 py-4 text-center text-brand-subtext font-medium text-[14px]">No suppliers found</td>
+                    <td colSpan="3" className="px-5 py-4 text-center text-brand-subtext font-medium text-[14px]">No suppliers found</td>
                   </tr>
                 ) : (
                   filteredSuppliers.map((s) => (
                     <tr key={s.id} className="hover:bg-slate-50/40 transition-colors">
                       <td className="px-5 py-3 font-bold text-[15px]">{s.name}</td>
+                      <td className="px-5 py-3 font-mono font-bold text-slate-800 text-[15px]">{s.supplier_code || s.code || "-"}</td>
                       <td className="px-5 py-3 text-right text-[14px]">
                         <button
                           onClick={() => handleOpenEditModal("suppliers", s)}
@@ -738,6 +760,23 @@ function MasterData() {
                   autoFocus
                 />
               </div>
+
+              {modalCategory === "suppliers" && (
+                <div>
+                  <label className="block text-[15px] font-bold uppercase tracking-wider text-brand-subtext mb-2">
+                    Supplier Code <span className="text-brand-danger">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={supplierCodeInput}
+                    onChange={(e) => setSupplierCodeInput(e.target.value)}
+                    placeholder="e.g. IKP, BIN01, BAT123, ABC-2026"
+                    className="h-12 w-full rounded-xl border border-brand-border bg-white px-4 text-[16px] placeholder:text-[15px] font-mono font-bold outline-none focus:border-brand-primary/60 focus:ring-2 focus:ring-brand-primary/10 uppercase"
+                    required
+                  />
+                  <p className="text-[13px] text-slate-400 mt-1 font-medium">Custom alphanumeric unique code for this supplier</p>
+                </div>
+              )}
 
               {/* Form Actions */}
               <div className="flex items-center justify-end gap-2 border-t border-brand-border pt-4 mt-2">

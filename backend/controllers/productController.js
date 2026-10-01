@@ -21,7 +21,15 @@ const query = async (sql, params = []) => {
 // Get all products
 exports.getProducts = async (req, res) => {
   try {
-    const result = await query("SELECT * FROM products ORDER BY created_at DESC");
+    const result = await query(`
+      SELECT p.*, 
+             COALESCE(s.name, p.supplier_name) AS supplier_name,
+             COALESCE(s.supplier_code, p.secret_code) AS supplier_code,
+             p.supplier_id
+      FROM products p
+      LEFT JOIN suppliers s ON p.supplier_id = s.id
+      ORDER BY p.created_at DESC
+    `);
     res.json(result);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -32,7 +40,15 @@ exports.getProducts = async (req, res) => {
 exports.getProductBySerial = async (req, res) => {
   const { serial_no } = req.params;
   try {
-    const result = await query("SELECT * FROM products WHERE serial_no = ?", [serial_no]);
+    const result = await query(`
+      SELECT p.*, 
+             COALESCE(s.name, p.supplier_name) AS supplier_name,
+             COALESCE(s.supplier_code, p.secret_code) AS supplier_code,
+             p.supplier_id
+      FROM products p
+      LEFT JOIN suppliers s ON p.supplier_id = s.id
+      WHERE p.serial_no = ?
+    `, [serial_no]);
     if (result.length === 0) {
       return res.status(404).json({ message: "Product not found" });
     }
@@ -50,7 +66,7 @@ exports.getProductFilters = async (req, res) => {
       query("SELECT name FROM product_types ORDER BY name"),
       query("SELECT name FROM sizes ORDER BY CAST(name AS UNSIGNED), name"),
       query("SELECT name FROM colors ORDER BY name"),
-      query("SELECT name FROM suppliers ORDER BY name")
+      query("SELECT id, name, name AS supplier_name, supplier_code, supplier_code AS code FROM suppliers ORDER BY name")
     ]);
 
     res.json({
@@ -58,7 +74,13 @@ exports.getProductFilters = async (req, res) => {
       types: types.map(t => t.name),
       sizes: sizes.map(s => s.name),
       colors: colors.map(c => c.name),
-      suppliers: suppliers.map(s => s.name)
+      suppliers: suppliers.map(s => ({
+        id: s.id,
+        name: s.name,
+        supplier_name: s.name,
+        code: s.supplier_code,
+        supplier_code: s.supplier_code
+      }))
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -72,10 +94,15 @@ exports.getProductByAttributes = async (req, res) => {
     return res.status(400).json({ error: "Missing attributes query" });
   }
   try {
-    const result = await query(
-      "SELECT * FROM products WHERE brand = ? AND type = ? AND size = ? AND color = ?",
-      [brand, type, size, color]
-    );
+    const result = await query(`
+      SELECT p.*,
+             COALESCE(s.name, p.supplier_name) AS supplier_name,
+             COALESCE(s.supplier_code, p.secret_code) AS supplier_code,
+             p.supplier_id
+      FROM products p
+      LEFT JOIN suppliers s ON p.supplier_id = s.id
+      WHERE p.brand = ? AND p.type = ? AND p.size = ? AND p.color = ?
+    `, [brand, type, size, color]);
     if (result.length === 0) {
       return res.status(404).json({ message: "Product not found" });
     }
@@ -100,18 +127,43 @@ exports.addOrUpdateStock = async (req, res) => {
     selling_price,
     discount_percent,
     stock,
+    supplier_id,
     supplier_name,
+    supplier_code,
     article_number,
     purchase_ref_no,
     secret_code
   } = req.body;
 
-  if (!brand || !type || !size || !color || purchase_price === undefined || selling_price === undefined || stock === undefined || !supplier_name || supplier_name.trim() === "" || !secret_code || secret_code.trim() === "") {
-    return res.status(400).json({ error: "Missing required fields (including Secret Code and Supplier Name)" });
+  let finalSupplierId = supplier_id ? parseInt(supplier_id) : null;
+  let finalSupplierName = supplier_name ? supplier_name.trim() : "";
+  let finalSupplierCode = supplier_code ? supplier_code.trim() : (secret_code ? secret_code.trim() : "");
+
+  // Resolve supplier details from database
+  try {
+    if (finalSupplierId) {
+      const sRows = await query("SELECT id, name, supplier_code FROM suppliers WHERE id = ?", [finalSupplierId]);
+      if (sRows.length > 0) {
+        finalSupplierName = sRows[0].name;
+        finalSupplierCode = sRows[0].supplier_code;
+      }
+    } else if (finalSupplierName) {
+      const sRows = await query("SELECT id, name, supplier_code FROM suppliers WHERE LOWER(TRIM(name)) = LOWER(TRIM(?))", [finalSupplierName]);
+      if (sRows.length > 0) {
+        finalSupplierId = sRows[0].id;
+        finalSupplierCode = sRows[0].supplier_code;
+      }
+    }
+  } catch (supErr) {
+    console.error("Error looking up supplier for addOrUpdateStock:", supErr);
+  }
+
+  if (!brand || !type || !size || !color || purchase_price === undefined || selling_price === undefined || stock === undefined || !finalSupplierName) {
+    return res.status(400).json({ error: "Missing required fields (including Supplier Name)" });
   }
 
   const stockVal = parseInt(stock);
-  const formattedSecretCode = secret_code.trim();
+  const formattedSecretCode = finalSupplierCode;
 
   try {
     // Check if same Brand + Type + Size + Color already exists in database
@@ -144,7 +196,7 @@ exports.addOrUpdateStock = async (req, res) => {
 
       const updateSql = `
         UPDATE products 
-        SET article_number = ?, secret_code = ?, purchase_price = ?, selling_price = ?, discount_percent = ?, stock = ?, supplier_name = ?
+        SET article_number = ?, secret_code = ?, purchase_price = ?, selling_price = ?, discount_percent = ?, stock = ?, supplier_id = ?, supplier_name = ?
         WHERE id = ?
       `;
       const values = [
@@ -154,7 +206,8 @@ exports.addOrUpdateStock = async (req, res) => {
         selling_price,
         discount_percent || 0,
         newStock,
-        supplier_name || null,
+        finalSupplierId,
+        finalSupplierName,
         existingProduct.id
       ];
 
@@ -165,12 +218,14 @@ exports.addOrUpdateStock = async (req, res) => {
       // Log to purchase_history
       const purchaseRefNo = purchase_ref_no ? purchase_ref_no.trim() : `PO-${new Date().getFullYear()}-${Math.floor(1000 + Math.random() * 9000)}`;
       await query(
-        `INSERT INTO purchase_history (product_id, purchase_date, purchase_ref_no, supplier_name, article_number, brand, type, size, color, quantity, purchase_price, total_value)
-         VALUES (?, NOW(), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO purchase_history (product_id, supplier_id, supplier_code, purchase_date, purchase_ref_no, supplier_name, article_number, brand, type, size, color, quantity, purchase_price, total_value)
+         VALUES (?, ?, ?, NOW(), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           existingProduct.id,
+          finalSupplierId,
+          finalSupplierCode,
           purchaseRefNo,
-          supplier_name,
+          finalSupplierName,
           finalArticleNumber,
           brand,
           type,
@@ -185,7 +240,7 @@ exports.addOrUpdateStock = async (req, res) => {
       // Log to activity_log
       db.query(
         "INSERT INTO activity_log (type, message) VALUES ('addition', ?)",
-        [`Added ${stockVal} ${brand} ${type}s (Supplier: ${supplier_name})`],
+        [`Added ${stockVal} ${brand} ${type}s (Supplier: ${finalSupplierName})`],
         (logErr) => {
           if (logErr) console.error("Error writing stock activity log:", logErr);
         }
@@ -208,7 +263,16 @@ exports.addOrUpdateStock = async (req, res) => {
         console.error("Error syncing stock notifications:", syncErr);
       }
 
-      res.json({ message: "Product stock updated successfully", product: { ...existingProduct, stock: newStock } });
+      res.json({ 
+        message: "Product stock updated successfully", 
+        product: { 
+          ...existingProduct, 
+          stock: newStock, 
+          supplier_id: finalSupplierId, 
+          supplier_name: finalSupplierName, 
+          supplier_code: finalSupplierCode 
+        } 
+      });
     } else {
       // Product does not exist. Check if article number is provided and is unique
       if (!article_number || article_number.trim() === "") {
@@ -234,8 +298,8 @@ exports.addOrUpdateStock = async (req, res) => {
       const serial_no = `SKU-${String(nextNum).padStart(3, '0')}`;
 
       const insertSql = `
-        INSERT INTO products (serial_no, brand, type, size, color, purchase_price, selling_price, discount_percent, stock, supplier_name, article_number, secret_code)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO products (serial_no, brand, type, size, color, purchase_price, selling_price, discount_percent, stock, supplier_id, supplier_name, article_number, secret_code)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `;
       const values = [
         serial_no, 
@@ -247,7 +311,8 @@ exports.addOrUpdateStock = async (req, res) => {
         selling_price, 
         discount_percent || 0, 
         stockVal, 
-        supplier_name || null, 
+        finalSupplierId, 
+        finalSupplierName, 
         formattedArticleNumber,
         formattedSecretCode
       ];
@@ -267,12 +332,14 @@ exports.addOrUpdateStock = async (req, res) => {
       // Log to purchase_history
       const purchaseRefNo = purchase_ref_no ? purchase_ref_no.trim() : `PO-${new Date().getFullYear()}-${Math.floor(1000 + Math.random() * 9000)}`;
       await query(
-        `INSERT INTO purchase_history (product_id, purchase_date, purchase_ref_no, supplier_name, article_number, brand, type, size, color, quantity, purchase_price, total_value)
-         VALUES (?, NOW(), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO purchase_history (product_id, supplier_id, supplier_code, purchase_date, purchase_ref_no, supplier_name, article_number, brand, type, size, color, quantity, purchase_price, total_value)
+         VALUES (?, ?, ?, NOW(), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           newId,
+          finalSupplierId,
+          finalSupplierCode,
           purchaseRefNo,
-          supplier_name,
+          finalSupplierName,
           formattedArticleNumber,
           brand,
           type,
@@ -293,7 +360,7 @@ exports.addOrUpdateStock = async (req, res) => {
       // Log to activity_log
       db.query(
         "INSERT INTO activity_log (type, message) VALUES ('addition', ?)",
-        [`Added ${stockVal} ${brand} ${type}s (Supplier: ${supplier_name})`],
+        [`Added ${stockVal} ${brand} ${type}s (Supplier: ${finalSupplierName})`],
         (logErr) => {
           if (logErr) console.error("Error writing product addition activity log:", logErr);
         }
@@ -318,7 +385,10 @@ exports.addOrUpdateStock = async (req, res) => {
         id: newId, 
         serial_no, 
         article_number: article_number.trim(),
-        barcode: generatedBarcode
+        barcode: generatedBarcode,
+        supplier_id: finalSupplierId,
+        supplier_name: finalSupplierName,
+        supplier_code: finalSupplierCode
       });
     }
   } catch (err) {
@@ -331,7 +401,16 @@ exports.getProductByArticleNumber = async (req, res) => {
   const { articleNumber } = req.params;
   try {
     const results = await query(
-      "SELECT id, article_number, brand, type, size, color, purchase_price, selling_price, stock, supplier_name AS supplier, discount_percent, barcode, secret_code FROM products WHERE article_number = ? OR barcode = ?",
+      `SELECT p.id, p.article_number, p.brand, p.type, p.size, p.color, p.purchase_price, p.selling_price, p.stock,
+              COALESCE(s.name, p.supplier_name) AS supplier,
+              COALESCE(s.name, p.supplier_name) AS supplier_name,
+              p.supplier_id,
+              COALESCE(s.supplier_code, p.secret_code) AS supplier_code,
+              p.discount_percent, p.barcode,
+              COALESCE(s.supplier_code, p.secret_code) AS secret_code
+       FROM products p
+       LEFT JOIN suppliers s ON p.supplier_id = s.id
+       WHERE p.article_number = ? OR p.barcode = ?`,
       [articleNumber, articleNumber]
     );
     if (results.length === 0) {
@@ -355,22 +434,53 @@ exports.getProductByArticleNumber = async (req, res) => {
 // Edit product details (validate article number uniqueness)
 exports.editProduct = async (req, res) => {
   const { id } = req.params;
-  const { article_number, secret_code, brand, type, size, color, purchase_price, selling_price, stock, supplier_name } = req.body;
+  const {
+    article_number,
+    secret_code,
+    brand,
+    type,
+    size,
+    color,
+    purchase_price,
+    selling_price,
+    stock,
+    supplier_id,
+    supplier_name,
+    supplier_code
+  } = req.body;
+
+  let finalSupplierId = supplier_id ? parseInt(supplier_id) : null;
+  let finalSupplierName = supplier_name ? supplier_name.trim() : "";
+  let finalSupplierCode = supplier_code ? supplier_code.trim() : (secret_code ? secret_code.trim() : "");
+
+  try {
+    if (finalSupplierId) {
+      const sRows = await query("SELECT id, name, supplier_code FROM suppliers WHERE id = ?", [finalSupplierId]);
+      if (sRows.length > 0) {
+        finalSupplierName = sRows[0].name;
+        finalSupplierCode = sRows[0].supplier_code;
+      }
+    } else if (finalSupplierName) {
+      const sRows = await query("SELECT id, name, supplier_code FROM suppliers WHERE LOWER(TRIM(name)) = LOWER(TRIM(?))", [finalSupplierName]);
+      if (sRows.length > 0) {
+        finalSupplierId = sRows[0].id;
+        finalSupplierCode = sRows[0].supplier_code;
+      }
+    }
+  } catch (sErr) {
+    console.error("Error looking up supplier in editProduct:", sErr);
+  }
 
   if (!article_number || article_number.trim() === "") {
     return res.status(400).json({ error: "Article Number is required." });
   }
 
-  if (!secret_code || secret_code.trim() === "") {
-    return res.status(400).json({ error: "Secret Code is required." });
-  }
-
-  if (!supplier_name || supplier_name.trim() === "") {
+  if (!finalSupplierName) {
     return res.status(400).json({ error: "Supplier Name is required." });
   }
 
   const formattedArticleNumber = article_number.trim().toUpperCase();
-  const formattedSecretCode = secret_code.trim();
+  const formattedSecretCode = finalSupplierCode || (secret_code ? secret_code.trim() : "");
 
   try {
     // 1. Check if another product already uses this article number
@@ -385,7 +495,7 @@ exports.editProduct = async (req, res) => {
     // 2. Update product
     const updateSql = `
       UPDATE products 
-      SET article_number = ?, secret_code = ?, brand = ?, type = ?, size = ?, color = ?, purchase_price = ?, selling_price = ?, stock = ?, supplier_name = ?
+      SET article_number = ?, secret_code = ?, brand = ?, type = ?, size = ?, color = ?, purchase_price = ?, selling_price = ?, stock = ?, supplier_id = ?, supplier_name = ?
       WHERE id = ?
     `;
     const values = [
@@ -398,7 +508,8 @@ exports.editProduct = async (req, res) => {
       purchase_price,
       selling_price,
       stock,
-      supplier_name || null,
+      finalSupplierId,
+      finalSupplierName,
       id
     ];
 
@@ -407,7 +518,7 @@ exports.editProduct = async (req, res) => {
     // Log to activity_log
     db.query(
       "INSERT INTO activity_log (type, message) VALUES ('edit', ?)",
-      [`Updated product ${brand} ${type} (Supplier: ${supplier_name})`],
+      [`Updated product ${brand} ${type} (Supplier: ${finalSupplierName})`],
       (logErr) => {
         if (logErr) console.error("Error writing product edit activity log:", logErr);
       }
@@ -464,6 +575,10 @@ exports.getMasterItems = async (req, res) => {
   if (!table) return res.status(400).json({ error: "Invalid master category" });
 
   try {
+    if (category === "suppliers") {
+      const results = await query("SELECT id, name, name AS supplier_name, supplier_code, supplier_code AS code, created_at FROM suppliers ORDER BY name");
+      return res.json(results);
+    }
     let orderClause = "ORDER BY name";
     if (category === "sizes") {
       orderClause = "ORDER BY CAST(name AS UNSIGNED), name";
@@ -478,9 +593,47 @@ exports.getMasterItems = async (req, res) => {
 // Add master item
 exports.addMasterItem = async (req, res) => {
   const { category } = req.params;
-  const { name } = req.body;
   const table = getTableName(category);
   if (!table) return res.status(400).json({ error: "Invalid master category" });
+
+  if (category === "suppliers") {
+    const { name, supplier_name, code, supplier_code } = req.body;
+    const finalName = (name || supplier_name || "").trim();
+    const finalCode = (code || supplier_code || "").trim();
+
+    if (!finalName) return res.status(400).json({ error: "Supplier Name is required." });
+    if (!finalCode) return res.status(400).json({ error: "Supplier Code is required." });
+
+    try {
+      // Validate unique supplier name
+      const dupName = await query("SELECT id FROM suppliers WHERE LOWER(TRIM(name)) = LOWER(?)", [finalName]);
+      if (dupName.length > 0) {
+        return res.status(400).json({ error: `'${finalName}' already exists as a supplier name.` });
+      }
+
+      // Validate unique supplier code
+      const dupCode = await query("SELECT id FROM suppliers WHERE LOWER(TRIM(supplier_code)) = LOWER(?)", [finalCode]);
+      if (dupCode.length > 0) {
+        return res.status(400).json({ error: `'${finalCode}' already exists as a Supplier Code.` });
+      }
+
+      const insertResult = await query("INSERT INTO suppliers (name, supplier_code) VALUES (?, ?)", [finalName, finalCode]);
+      return res.status(201).json({
+        id: insertResult.insertId,
+        name: finalName,
+        supplier_name: finalName,
+        code: finalCode,
+        supplier_code: finalCode
+      });
+    } catch (err) {
+      if (err.code === "ER_DUP_ENTRY") {
+        return res.status(400).json({ error: "Supplier name or code already exists." });
+      }
+      return res.status(500).json({ error: err.message });
+    }
+  }
+
+  const { name } = req.body;
   if (!name || name.trim() === "") return res.status(400).json({ error: "Item name cannot be empty" });
 
   try {
@@ -507,9 +660,58 @@ const getColumnName = (category) => {
 // Edit master item
 exports.editMasterItem = async (req, res) => {
   const { category, id } = req.params;
-  const { name } = req.body;
   const table = getTableName(category);
   if (!table) return res.status(400).json({ error: "Invalid master category" });
+
+  if (category === "suppliers") {
+    const { name, supplier_name, code, supplier_code } = req.body;
+    const finalName = (name || supplier_name || "").trim();
+    const finalCode = (code || supplier_code || "").trim();
+
+    if (!finalName) return res.status(400).json({ error: "Supplier Name is required." });
+    if (!finalCode) return res.status(400).json({ error: "Supplier Code is required." });
+
+    try {
+      const currentRes = await query("SELECT * FROM suppliers WHERE id = ?", [id]);
+      if (currentRes.length === 0) {
+        return res.status(404).json({ error: "Supplier not found." });
+      }
+      const oldSupplier = currentRes[0];
+
+      // Check unique name
+      const dupName = await query("SELECT id FROM suppliers WHERE LOWER(TRIM(name)) = LOWER(?) AND id != ?", [finalName, id]);
+      if (dupName.length > 0) {
+        return res.status(400).json({ error: `'${finalName}' already exists as a supplier name.` });
+      }
+
+      // Check unique code
+      const dupCode = await query("SELECT id FROM suppliers WHERE LOWER(TRIM(supplier_code)) = LOWER(?) AND id != ?", [finalCode, id]);
+      if (dupCode.length > 0) {
+        return res.status(400).json({ error: `'${finalCode}' already exists as a Supplier Code.` });
+      }
+
+      await query("UPDATE suppliers SET name = ?, supplier_code = ? WHERE id = ?", [finalName, finalCode, id]);
+
+      // Cascade update to products and purchase_history
+      await query("UPDATE products SET supplier_name = ?, secret_code = ? WHERE supplier_id = ? OR supplier_name = ?", [finalName, finalCode, id, oldSupplier.name]);
+      await query("UPDATE purchase_history SET supplier_name = ?, supplier_code = ? WHERE supplier_id = ? OR supplier_name = ?", [finalName, finalCode, id, oldSupplier.name]);
+
+      return res.json({
+        id: parseInt(id),
+        name: finalName,
+        supplier_name: finalName,
+        code: finalCode,
+        supplier_code: finalCode
+      });
+    } catch (err) {
+      if (err.code === "ER_DUP_ENTRY") {
+        return res.status(400).json({ error: "Supplier name or code already exists." });
+      }
+      return res.status(500).json({ error: err.message });
+    }
+  }
+
+  const { name } = req.body;
   if (!name || name.trim() === "") return res.status(400).json({ error: "Item name cannot be empty" });
 
   try {
@@ -555,12 +757,29 @@ exports.deleteMasterItem = async (req, res) => {
   if (!table) return res.status(400).json({ error: "Invalid master category" });
 
   try {
-    // 1. Fetch item name
-    const currentRes = await query(`SELECT name FROM ${table} WHERE id = ?`, [id]);
+    const currentRes = await query(`SELECT * FROM ${table} WHERE id = ?`, [id]);
     if (currentRes.length === 0) {
       return res.status(404).json({ error: "Master item not found" });
     }
     const itemName = currentRes[0].name;
+
+    if (category === "suppliers") {
+      const pUsage = await query("SELECT COUNT(*) AS count FROM products WHERE supplier_id = ? OR supplier_name = ?", [id, itemName]);
+      if (pUsage[0].count > 0) {
+        return res.status(400).json({ 
+          error: `Cannot delete. This supplier is currently used by ${pUsage[0].count} products in inventory.` 
+        });
+      }
+      const phUsage = await query("SELECT COUNT(*) AS count FROM purchase_history WHERE supplier_id = ? OR supplier_name = ?", [id, itemName]);
+      if (phUsage[0].count > 0) {
+        return res.status(400).json({ 
+          error: `Cannot delete. This supplier has recorded purchase history records.` 
+        });
+      }
+      await query("DELETE FROM suppliers WHERE id = ?", [id]);
+      return res.json({ message: "Supplier deleted successfully", id: parseInt(id) });
+    }
+
     const col = getColumnName(category);
 
     // 2. Check if name is currently used by products in inventory / expenses
@@ -579,7 +798,6 @@ exports.deleteMasterItem = async (req, res) => {
           if (category === "types") categoryLabel = "product type";
           if (category === "sizes") categoryLabel = "size";
           if (category === "colors") categoryLabel = "color";
-          if (category === "suppliers") categoryLabel = "supplier";
           return res.status(400).json({ 
             error: `Cannot delete. This ${categoryLabel} is currently used by existing products.` 
           });
@@ -593,6 +811,44 @@ exports.deleteMasterItem = async (req, res) => {
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
+};
+
+// Supplier CRUD endpoints
+exports.getSuppliers = async (req, res) => {
+  try {
+    const suppliers = await query("SELECT id, name, name AS supplier_name, supplier_code, supplier_code AS code, created_at FROM suppliers ORDER BY name");
+    res.json(suppliers);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};
+
+exports.getSupplierById = async (req, res) => {
+  const { id } = req.params;
+  try {
+    const suppliers = await query("SELECT id, name, name AS supplier_name, supplier_code, supplier_code AS code, created_at FROM suppliers WHERE id = ?", [id]);
+    if (suppliers.length === 0) {
+      return res.status(404).json({ error: "Supplier not found." });
+    }
+    res.json(suppliers[0]);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};
+
+exports.createSupplier = async (req, res) => {
+  req.params.category = "suppliers";
+  return exports.addMasterItem(req, res);
+};
+
+exports.updateSupplier = async (req, res) => {
+  req.params.category = "suppliers";
+  return exports.editMasterItem(req, res);
+};
+
+exports.deleteSupplier = async (req, res) => {
+  req.params.category = "suppliers";
+  return exports.deleteMasterItem(req, res);
 };
 
 // Get all settings

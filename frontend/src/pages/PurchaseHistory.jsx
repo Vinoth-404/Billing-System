@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import axios from "axios";
 import { jsPDF } from "jspdf";
 import autoTable from "jspdf-autotable";
-import { ShoppingCart, Search, Calendar, RefreshCw, FileSpreadsheet, FileText } from "lucide-react";
+import { ShoppingCart, Search, RefreshCw, FileSpreadsheet, FileText } from "lucide-react";
 import { useSettings } from "../context/SettingsContext";
 
 const API = import.meta.env.VITE_API_URL;
@@ -15,9 +15,9 @@ function PurchaseHistory() {
 
   // Filters state
   const [supplier, setSupplier] = useState("");
+  const [supplierCode, setSupplierCode] = useState("");
   const [brand, setBrand] = useState("");
   const [type, setType] = useState("");
-  const [articleNumber, setArticleNumber] = useState("");
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
 
@@ -49,9 +49,9 @@ function PurchaseHistory() {
       .get(`${API}/api/purchases`, {
         params: {
           supplier: supplier || undefined,
+          supplier_code: supplierCode.trim() || undefined,
           brand: brand || undefined,
           type: type || undefined,
-          article_number: articleNumber.trim() || undefined,
           startDate: startDate || undefined,
           endDate: endDate || undefined
         }
@@ -75,7 +75,7 @@ function PurchaseHistory() {
 
   useEffect(() => {
     fetchPurchaseHistory();
-  }, [supplier, brand, type, articleNumber, startDate, endDate]);
+  }, [supplier, supplierCode, brand, type, startDate, endDate]);
 
   // Real-time updates
   useEffect(() => {
@@ -89,13 +89,13 @@ function PurchaseHistory() {
       window.removeEventListener("stock-updated", handleUpdate);
       window.removeEventListener("storage", handleUpdate);
     };
-  }, [supplier, brand, type, articleNumber, startDate, endDate]);
+  }, [supplier, supplierCode, brand, type, startDate, endDate]);
 
   const handleResetFilters = () => {
     setSupplier("");
+    setSupplierCode("");
     setBrand("");
     setType("");
-    setArticleNumber("");
     setStartDate("");
     setEndDate("");
   };
@@ -104,9 +104,9 @@ function PurchaseHistory() {
     try {
       const params = new URLSearchParams();
       if (supplier) params.append("supplier", supplier);
+      if (supplierCode) params.append("supplier_code", supplierCode);
       if (brand) params.append("brand", brand);
       if (type) params.append("type", type);
-      if (articleNumber) params.append("articleNumber", articleNumber);
       if (startDate) params.append("startDate", startDate);
       if (endDate) params.append("endDate", endDate);
       const qs = params.toString() ? `?${params.toString()}` : "";
@@ -157,9 +157,9 @@ function PurchaseHistory() {
     try {
       const params = new URLSearchParams();
       if (supplier) params.append("supplier", supplier);
+      if (supplierCode) params.append("supplier_code", supplierCode);
       if (brand) params.append("brand", brand);
       if (type) params.append("type", type);
-      if (articleNumber) params.append("articleNumber", articleNumber);
       if (startDate) params.append("startDate", startDate);
       if (endDate) params.append("endDate", endDate);
       const qs = params.toString() ? `?${params.toString()}` : "";
@@ -189,9 +189,9 @@ function PurchaseHistory() {
       
       const activeFilters = [];
       if (supplier) activeFilters.push(`Supplier: "${supplier}"`);
+      if (supplierCode) activeFilters.push(`Supplier Code: "${supplierCode}"`);
       if (brand) activeFilters.push(`Brand: "${brand}"`);
       if (type) activeFilters.push(`Type: "${type}"`);
-      if (articleNumber) activeFilters.push(`Article: "${articleNumber}"`);
       if (activeFilters.length > 0) {
         doc.text(`Applied Filters: ${activeFilters.join(", ")}`, 14, 38);
       }
@@ -227,7 +227,7 @@ function PurchaseHistory() {
       yPos += 4;
 
       const tableHeaders = [
-        ["Purchase Date", "Ref No", "Supplier Name", "Article No", "Brand", "Product Type", "Size", "Color", "Quantity", "Purchase Price (Rs.)", "Total Value (Rs.)"]
+        ["Purchase Date", "Ref No", "Supplier Name", "Supplier Code", "Article No", "Brand", "Product Type", "Size", "Color", "Quantity", "Purchase Price (Rs.)", "Total Value (Rs.)"]
       ];
       
       const tableData = data.records.map(r => {
@@ -236,6 +236,7 @@ function PurchaseHistory() {
           `${d.toLocaleDateString("en-IN")} ${d.toLocaleTimeString("en-IN", { hour: '2-digit', minute: '2-digit' })}`,
           r.purchase_ref_no || "-",
           r.supplier_name || "-",
+          r.supplier_code || "-",
           r.article_number || "-",
           r.brand || "-",
           r.type || "-",
@@ -255,17 +256,18 @@ function PurchaseHistory() {
         headStyles: { fillColor: [30, 41, 59], textColor: 255, fontStyle: "bold", fontSize: 8 },
         bodyStyles: { fontSize: 7.5 },
         columnStyles: {
-          0: { cellWidth: 28, halign: "center" },
-          1: { cellWidth: 24 },
-          2: { cellWidth: 32 },
-          3: { cellWidth: 24 },
-          4: { cellWidth: 24 },
-          5: { cellWidth: 24 },
-          6: { cellWidth: 12, halign: "center" },
-          7: { cellWidth: 20, halign: "center" },
-          8: { cellWidth: 16, halign: "center" },
-          9: { cellWidth: 28, halign: "right" },
-          10: { cellWidth: 28, halign: "right" }
+          0: { cellWidth: 26, halign: "center" },
+          1: { cellWidth: 22 },
+          2: { cellWidth: 30 },
+          3: { cellWidth: 20, halign: "center" },
+          4: { cellWidth: 22 },
+          5: { cellWidth: 22 },
+          6: { cellWidth: 22 },
+          7: { cellWidth: 12, halign: "center" },
+          8: { cellWidth: 18, halign: "center" },
+          9: { cellWidth: 14, halign: "center" },
+          10: { cellWidth: 24, halign: "right" },
+          11: { cellWidth: 26, halign: "right" }
         },
         didDrawPage: (dataArg) => {
           const totalPages = doc.internal.getNumberOfPages();
@@ -293,7 +295,7 @@ function PurchaseHistory() {
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h1 className="text-[28px] sm:text-[36px] md:text-[44px] font-bold tracking-tight text-brand-text leading-tight">Purchase History</h1>
-          <p className="text-[15px] sm:text-[18px] font-medium text-brand-subtext mt-1">Audit log of all slipper inventory restocks and stock transactions</p>
+          <p className="text-[15px] sm:text-[18px] font-medium text-brand-subtext mt-1">Audit log of all slipper inventory restocks, supplier codes, and transactions</p>
         </div>
         <div className="flex items-center gap-3">
           <button
@@ -320,70 +322,104 @@ function PurchaseHistory() {
           <h3 className="font-bold text-[16px] uppercase tracking-wider">Restock Filters</h3>
         </div>
         <div className="grid gap-4 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-6">
-          {/* Supplier */}
-          <select
-            value={supplier}
-            onChange={(e) => setSupplier(e.target.value)}
-            className="h-11 w-full rounded-xl border border-brand-border bg-white px-3 text-sm font-semibold outline-none focus:border-brand-primary/60 focus:ring-2 focus:ring-brand-primary/10"
-          >
-            <option value="">All Suppliers</option>
-            {filterOptions.suppliers.map((s) => (
-              <option key={s} value={s}>{s}</option>
-            ))}
-          </select>
+          {/* Supplier Dropdown */}
+          <div>
+            <label className="block text-[13px] font-bold uppercase tracking-wider text-brand-subtext mb-1">
+              Supplier Name
+            </label>
+            <select
+              value={supplier}
+              onChange={(e) => setSupplier(e.target.value)}
+              className="h-11 w-full rounded-xl border border-brand-border bg-white px-3 text-sm font-semibold outline-none focus:border-brand-primary/60 focus:ring-2 focus:ring-brand-primary/10"
+            >
+              <option value="">All Suppliers</option>
+              {filterOptions.suppliers.map((s) => {
+                const name = typeof s === "object" ? (s.name || s.supplier_name) : s;
+                const code = typeof s === "object" ? (s.code || s.supplier_code) : "";
+                return (
+                  <option key={name} value={name}>
+                    {name} {code ? `(${code})` : ""}
+                  </option>
+                );
+              })}
+            </select>
+          </div>
+
+          {/* Supplier Code Search */}
+          <div>
+            <label className="block text-[13px] font-bold uppercase tracking-wider text-brand-subtext mb-1">
+              Supplier Code
+            </label>
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-brand-subtext" />
+              <input
+                type="text"
+                value={supplierCode}
+                onChange={(e) => setSupplierCode(e.target.value)}
+                placeholder="Search supplier code..."
+                className="h-11 w-full rounded-xl border border-brand-border bg-white pl-9 pr-3 text-sm font-semibold outline-none focus:border-brand-primary/60 focus:ring-2 focus:ring-brand-primary/10 uppercase"
+              />
+            </div>
+          </div>
 
           {/* Brand */}
-          <select
-            value={brand}
-            onChange={(e) => setBrand(e.target.value)}
-            className="h-11 w-full rounded-xl border border-brand-border bg-white px-3 text-sm font-semibold outline-none focus:border-brand-primary/60 focus:ring-2 focus:ring-brand-primary/10"
-          >
-            <option value="">All Brands</option>
-            {filterOptions.brands.map((b) => (
-              <option key={b} value={b}>{b}</option>
-            ))}
-          </select>
+          <div>
+            <label className="block text-[13px] font-bold uppercase tracking-wider text-brand-subtext mb-1">
+              Brand
+            </label>
+            <select
+              value={brand}
+              onChange={(e) => setBrand(e.target.value)}
+              className="h-11 w-full rounded-xl border border-brand-border bg-white px-3 text-sm font-semibold outline-none focus:border-brand-primary/60 focus:ring-2 focus:ring-brand-primary/10"
+            >
+              <option value="">All Brands</option>
+              {filterOptions.brands.map((b) => (
+                <option key={b} value={b}>{b}</option>
+              ))}
+            </select>
+          </div>
 
           {/* Type */}
-          <select
-            value={type}
-            onChange={(e) => setType(e.target.value)}
-            className="h-11 w-full rounded-xl border border-brand-border bg-white px-3 text-sm font-semibold outline-none focus:border-brand-primary/60 focus:ring-2 focus:ring-brand-primary/10"
-          >
-            <option value="">All Types</option>
-            {filterOptions.types.map((t) => (
-              <option key={t} value={t}>{t}</option>
-            ))}
-          </select>
-
-          {/* Article Search */}
-          <div className="relative">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-brand-subtext" />
-            <input
-              type="text"
-              value={articleNumber}
-              onChange={(e) => setArticleNumber(e.target.value)}
-              placeholder="Article No..."
-              className="h-11 w-full rounded-xl border border-brand-border bg-white pl-9 pr-3 text-sm font-semibold outline-none focus:border-brand-primary/60 focus:ring-2 focus:ring-brand-primary/10 uppercase"
-            />
+          <div>
+            <label className="block text-[13px] font-bold uppercase tracking-wider text-brand-subtext mb-1">
+              Product Type
+            </label>
+            <select
+              value={type}
+              onChange={(e) => setType(e.target.value)}
+              className="h-11 w-full rounded-xl border border-brand-border bg-white px-3 text-sm font-semibold outline-none focus:border-brand-primary/60 focus:ring-2 focus:ring-brand-primary/10"
+            >
+              <option value="">All Types</option>
+              {filterOptions.types.map((t) => (
+                <option key={t} value={t}>{t}</option>
+              ))}
+            </select>
           </div>
 
           {/* Date range filters */}
-          <input
-            type="date"
-            value={startDate}
-            onChange={(e) => setStartDate(e.target.value)}
-            className="h-11 w-full rounded-xl border border-brand-border bg-white px-3 text-sm font-semibold outline-none focus:border-brand-primary/60 focus:ring-2 focus:ring-brand-primary/10"
-            title="From Date"
-          />
+          <div>
+            <label className="block text-[13px] font-bold uppercase tracking-wider text-brand-subtext mb-1">
+              From Date
+            </label>
+            <input
+              type="date"
+              value={startDate}
+              onChange={(e) => setStartDate(e.target.value)}
+              className="h-11 w-full rounded-xl border border-brand-border bg-white px-3 text-sm font-semibold outline-none focus:border-brand-primary/60 focus:ring-2 focus:ring-brand-primary/10"
+            />
+          </div>
 
-          <input
-            type="date"
-            value={endDate}
-            onChange={(e) => setEndDate(e.target.value)}
-            className="h-11 w-full rounded-xl border border-brand-border bg-white px-3 text-sm font-semibold outline-none focus:border-brand-primary/60 focus:ring-2 focus:ring-brand-primary/10"
-            title="To Date"
-          />
+          <div>
+            <label className="block text-[13px] font-bold uppercase tracking-wider text-brand-subtext mb-1">
+              To Date
+            </label>
+            <input
+              type="date"
+              value={endDate}
+              onChange={(e) => setEndDate(e.target.value)}
+              className="h-11 w-full rounded-xl border border-brand-border bg-white px-3 text-sm font-semibold outline-none focus:border-brand-primary/60 focus:ring-2 focus:ring-brand-primary/10"
+            />
+          </div>
         </div>
         <div className="flex justify-end pt-2 border-t border-slate-50">
           <button
@@ -404,6 +440,7 @@ function PurchaseHistory() {
                 <th className="px-5 py-4">Purchase Date</th>
                 <th className="px-5 py-4">Reference No</th>
                 <th className="px-5 py-4">Supplier Name</th>
+                <th className="px-5 py-4">Supplier Code</th>
                 <th className="px-5 py-4">Article No</th>
                 <th className="px-5 py-4">Brand / Type</th>
                 <th className="px-5 py-4 text-center">Size / Color</th>
@@ -415,13 +452,13 @@ function PurchaseHistory() {
             <tbody className="divide-y divide-slate-100 font-semibold text-brand-text">
               {loading ? (
                 <tr>
-                  <td colSpan="9" className="text-center py-8">
+                  <td colSpan="10" className="text-center py-8">
                     <div className="h-8 w-8 animate-spin rounded-full border-4 border-brand-primary border-t-transparent mx-auto"></div>
                   </td>
                 </tr>
               ) : records.length === 0 ? (
                 <tr>
-                  <td colSpan="9" className="text-center py-8 text-brand-subtext font-normal">
+                  <td colSpan="10" className="text-center py-8 text-brand-subtext font-normal">
                     No purchase logs found matching the filter criteria.
                   </td>
                 </tr>
@@ -436,10 +473,15 @@ function PurchaseHistory() {
                     </td>
                     <td className="px-5 py-4 text-brand-accent font-bold uppercase">{r.purchase_ref_no}</td>
                     <td className="px-5 py-4 text-brand-text font-bold">{r.supplier_name}</td>
+                    <td className="px-5 py-4">
+                      <span className="inline-block px-2.5 py-1 rounded-md bg-slate-100 font-mono font-bold text-slate-800 border border-slate-200 text-xs">
+                        {r.supplier_code || "-"}
+                      </span>
+                    </td>
                     <td className="px-5 py-4 font-bold text-xs uppercase text-slate-700">{r.article_number}</td>
                     <td className="px-5 py-4 font-bold">{r.brand} {r.type}</td>
                     <td className="px-5 py-4 text-center text-xs">S-{r.size} / {r.color}</td>
-                    <td className="px-5 py-4 text-slate-600 font-bold">{r.quantity} pairs</td>
+                    <td className="px-5 py-4 text-slate-600 font-bold text-center">{r.quantity} pairs</td>
                     <td className="px-5 py-4 text-right font-medium text-slate-500">₹{Number(r.purchase_price).toFixed(2)}</td>
                     <td className="px-5 py-4 text-right font-bold text-emerald-600">
                       ₹{Number(r.total_value).toFixed(2)}

@@ -27,6 +27,9 @@ function Inventory() {
   const [editingProduct, setEditingProduct] = useState(null);
   const [editForm, setEditForm] = useState({
     article_number: "",
+    supplier_id: "",
+    supplier_name: "",
+    supplier_code: "",
     secret_code: "",
     brand: "",
     type: "",
@@ -34,8 +37,7 @@ function Inventory() {
     color: "",
     purchase_price: "",
     selling_price: "",
-    stock: "",
-    supplier_name: ""
+    stock: ""
   });
   const [editError, setEditError] = useState("");
   const [editSubmitting, setEditSubmitting] = useState(false);
@@ -45,7 +47,8 @@ function Inventory() {
     brands: [],
     types: [],
     sizes: [],
-    colors: []
+    colors: [],
+    suppliers: []
   });
 
   // Selected filter states (tied to selectors)
@@ -67,7 +70,6 @@ function Inventory() {
   };
 
   const [filteredProducts, setFilteredProducts] = useState([]);
-
 
   // Fetch unique filter values from DISTINCT DB API
   const fetchFilterOptions = () => {
@@ -135,6 +137,7 @@ function Inventory() {
       const matchSearch = query === "" || (
         (p.article_number && p.article_number.toString().toLowerCase().includes(query)) ||
         (p.secret_code && p.secret_code.toString().toLowerCase().includes(query)) ||
+        (p.supplier_code && p.supplier_code.toString().toLowerCase().includes(query)) ||
         (p.serial_no && p.serial_no.toLowerCase().includes(query)) ||
         (p.brand && p.brand.toLowerCase().includes(query)) ||
         (p.type && p.type.toLowerCase().includes(query)) ||
@@ -177,20 +180,56 @@ function Inventory() {
   const handleEditClick = (prod) => {
     if (!prod) return;
     setEditingProduct(prod);
+    
+    // Find supplier code from filter options or product
+    const supObj = filterOptions.suppliers?.find(
+      (s) => (typeof s === "object" ? (s.name || s.supplier_name) : s) === prod.supplier_name || (typeof s === "object" && s.id === prod.supplier_id)
+    );
+    const supCode = prod.supplier_code || prod.secret_code || (supObj ? (supObj.code || supObj.supplier_code) : "");
+    const supId = prod.supplier_id || (supObj ? supObj.id : "");
+
     setEditForm({
       article_number: prod.article_number || "",
-      secret_code: prod.secret_code || "",
+      supplier_id: supId,
+      supplier_name: prod.supplier_name || "",
+      supplier_code: supCode,
+      secret_code: supCode,
       brand: prod.brand || "",
       type: prod.type || "",
       size: prod.size !== undefined && prod.size !== null ? prod.size.toString() : "",
       color: prod.color || "",
       purchase_price: prod.purchase_price !== undefined && prod.purchase_price !== null ? prod.purchase_price : "",
       selling_price: prod.selling_price !== undefined && prod.selling_price !== null ? prod.selling_price : "",
-      stock: prod.stock !== undefined && prod.stock !== null ? prod.stock : 0,
-      supplier_name: prod.supplier_name || ""
+      stock: prod.stock !== undefined && prod.stock !== null ? prod.stock : 0
     });
     setEditError("");
     setEditModalOpen(true);
+  };
+
+  const handleEditSupplierChange = (e) => {
+    const selectedName = e.target.value;
+    const supObj = filterOptions.suppliers?.find(
+      (s) => (typeof s === "object" ? (s.name || s.supplier_name) : s) === selectedName
+    );
+
+    if (supObj && typeof supObj === "object") {
+      const code = supObj.code || supObj.supplier_code || "";
+      setEditForm(prev => ({
+        ...prev,
+        supplier_name: selectedName,
+        supplier_id: supObj.id || "",
+        supplier_code: code,
+        secret_code: code
+      }));
+    } else {
+      setEditForm(prev => ({
+        ...prev,
+        supplier_name: selectedName,
+        supplier_id: "",
+        supplier_code: "",
+        secret_code: ""
+      }));
+    }
   };
 
   const handleEditSubmit = (e) => {
@@ -199,16 +238,23 @@ function Inventory() {
       setEditError("Article Number is required");
       return;
     }
-    if (!editForm.secret_code.trim()) {
-      setEditError("Secret Code is required");
+    if (!editForm.supplier_name) {
+      setEditError("Supplier is required");
       return;
     }
 
     setEditSubmitting(true);
     setEditError("");
 
+    const payload = {
+      ...editForm,
+      article_number: editForm.article_number.trim().toUpperCase(),
+      supplier_code: editForm.supplier_code || editForm.secret_code,
+      secret_code: editForm.supplier_code || editForm.secret_code
+    };
+
     axios
-      .put(`${API}/api/products/${editingProduct.id}`, editForm)
+      .put(`${API}/api/products/${editingProduct.id}`, payload)
       .then(() => {
         setEditModalOpen(false);
         setEditSubmitting(false);
@@ -236,7 +282,6 @@ function Inventory() {
         alert(err.response?.data?.error || "Failed to delete product.");
       });
   };
-
 
   const getStatusBadge = (stock) => {
     const threshold = settings?.stock_threshold || parseInt(localStorage.getItem("settings_stockThreshold"), 10) || 5;
@@ -284,7 +329,7 @@ function Inventory() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-[44px] font-bold tracking-tight text-brand-text leading-tight">Inventory Management</h1>
-          <p className="text-[18px] font-medium text-brand-subtext mt-1">Audit serial codes, review cost prices, and track physical slipper stock levels</p>
+          <p className="text-[18px] font-medium text-brand-subtext mt-1">Audit supplier codes, review cost prices, and track physical slipper stock levels</p>
         </div>
         <button
           onClick={handleRefresh}
@@ -302,7 +347,7 @@ function Inventory() {
             <Filter className="h-6 w-6 text-brand-accent" />
             <h3 className="text-[24px] font-bold text-brand-text">Filter Inventory Stock</h3>
           </div>
-          {(selectedBrand || selectedType || selectedSize || selectedColor || selectedStatus) && (
+          {(selectedBrand || selectedType || selectedSize || selectedColor || selectedStatus || selectedSupplier || searchArtNo) && (
             <button
               type="button"
               onClick={handleResetFilters}
@@ -322,7 +367,7 @@ function Inventory() {
                 type="text"
                 value={searchArtNo}
                 onChange={(e) => setSearchArtNo(e.target.value)}
-                placeholder="Search by Art No, SKU..."
+                placeholder="Search by Art No, Code..."
                 className="h-12 w-full rounded-xl border border-brand-border bg-white pl-10 pr-3 text-[16px] placeholder:text-[15px] font-medium outline-none focus:border-brand-primary/60 focus:ring-2 focus:ring-brand-primary/10"
               />
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-slate-400" />
@@ -398,9 +443,15 @@ function Inventory() {
               className="h-12 w-full rounded-xl border border-brand-border bg-white px-3.5 text-[16px] font-medium outline-none focus:border-brand-primary/60 focus:ring-2 focus:ring-brand-primary/10"
             >
               <option value="">All Suppliers</option>
-              {filterOptions.suppliers && filterOptions.suppliers.map((s) => (
-                <option key={s} value={s}>{s}</option>
-              ))}
+              {filterOptions.suppliers && filterOptions.suppliers.map((s) => {
+                const name = typeof s === "object" ? (s.name || s.supplier_name) : s;
+                const code = typeof s === "object" ? (s.code || s.supplier_code) : "";
+                return (
+                  <option key={name} value={name}>
+                    {name} {code ? `(${code})` : ""}
+                  </option>
+                );
+              })}
             </select>
           </div>
 
@@ -419,8 +470,6 @@ function Inventory() {
             </select>
           </div>
         </div>
-
-
       </div>
 
       {/* Inventory Stock Ledger Table */}
@@ -450,10 +499,10 @@ function Inventory() {
                   <th className="px-5 py-3.5">Product</th>
                   <th className="px-5 py-3.5 text-center">Size</th>
                   <th className="px-5 py-3.5">Color</th>
-                  <th className="px-5 py-3.5">Secret Code</th>
                   <th className="px-5 py-3.5 cursor-pointer hover:text-brand-accent transition-colors" onClick={() => requestSort("supplier_name")}>
-                    Supplier {sortConfig.key === "supplier_name" && (sortConfig.direction === "asc" ? "▲" : "▼")}
+                    Supplier Name {sortConfig.key === "supplier_name" && (sortConfig.direction === "asc" ? "▲" : "▼")}
                   </th>
+                  <th className="px-5 py-3.5">Supplier Code</th>
                   <th className="px-5 py-3.5 text-right">Purchase Price</th>
                   <th className="px-5 py-3.5 text-right">Selling Price</th>
                   <th className="px-5 py-3.5 text-center">Stock</th>
@@ -469,8 +518,12 @@ function Inventory() {
                     <td className="px-5 py-3.5 text-[15px]">{prod.type}</td>
                     <td className="px-5 py-3.5 text-center text-[15px]">{prod.size}</td>
                     <td className="px-5 py-3.5 text-[15px]">{prod.color}</td>
-                    <td className="px-5 py-3.5 text-[15px] font-mono font-bold text-slate-800">{prod.secret_code || "-"}</td>
-                    <td className="px-5 py-3.5 text-slate-500 text-[15px]">{prod.supplier_name || "-"}</td>
+                    <td className="px-5 py-3.5 font-bold text-slate-800 text-[15px]">{prod.supplier_name || "-"}</td>
+                    <td className="px-5 py-3.5 text-[15px]">
+                      <span className="inline-block px-2.5 py-1 rounded-md bg-slate-100 font-mono font-bold text-slate-800 border border-slate-200">
+                        {prod.supplier_code || prod.secret_code || "-"}
+                      </span>
+                    </td>
                     <td className="px-5 py-3.5 text-right text-[15px]">₹{Number(prod.purchase_price).toFixed(2)}</td>
                     <td className="px-5 py-3.5 text-right text-[15px]">₹{Number(prod.selling_price).toFixed(2)}</td>
                     <td className="px-5 py-3.5 text-center text-[15px]">{prod.stock} pairs</td>
@@ -505,7 +558,7 @@ function Inventory() {
       {editModalOpen && (
         <ErrorBoundary onReset={() => setEditModalOpen(false)}>
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4 backdrop-blur-xs">
-            <div className="w-full max-w-md bg-white rounded-2xl border border-brand-border shadow-premium overflow-hidden animate-slide-up">
+            <div className="w-full max-w-lg bg-white rounded-2xl border border-brand-border shadow-premium overflow-hidden animate-slide-up">
               <div className="flex items-center justify-between border-b border-brand-border px-6 py-4 bg-slate-50/50">
                 <h3 className="text-[20px] font-bold text-brand-text uppercase tracking-wider">
                   Edit Product Attributes
@@ -526,29 +579,63 @@ function Inventory() {
                   </div>
                 )}
                 
+                {/* Article Number */}
+                <div>
+                  <label className="block text-[15px] font-bold uppercase tracking-wider text-brand-subtext mb-1">
+                    Article Number <span className="text-brand-danger">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={editForm.article_number}
+                    onChange={(e) => setEditForm(prev => ({ ...prev, article_number: e.target.value }))}
+                    className="h-11 w-full rounded-xl border border-brand-border bg-white px-3.5 text-[16px] font-medium outline-none focus:border-brand-primary/60 font-bold uppercase"
+                    required
+                  />
+                </div>
+
+                {/* Supplier Selection and Code */}
                 <div className="grid grid-cols-2 gap-3">
                   <div>
-                    <label className="block text-[15px] font-bold uppercase tracking-wider text-brand-subtext mb-1">
-                      Article Number <span className="text-brand-danger">*</span>
-                    </label>
-                    <input
-                      type="text"
-                      value={editForm.article_number}
-                      onChange={(e) => setEditForm(prev => ({ ...prev, article_number: e.target.value }))}
-                      className="h-11 w-full rounded-xl border border-brand-border bg-white px-3.5 text-[16px] font-medium outline-none focus:border-brand-primary/60 font-bold uppercase"
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="block text-[15px] font-bold uppercase tracking-wider text-brand-subtext">
+                        Supplier <span className="text-brand-danger">*</span>
+                      </label>
+                      <button
+                        type="button"
+                        onClick={() => handleAddNewClick("suppliers")}
+                        className="text-[13px] font-bold text-brand-accent hover:text-blue-600 transition-colors uppercase"
+                      >
+                        + Manage
+                      </button>
+                    </div>
+                    <select
+                      value={editForm.supplier_name}
+                      onChange={handleEditSupplierChange}
+                      className="h-11 w-full rounded-xl border border-brand-border bg-white px-3.5 text-[16px] font-medium outline-none focus:border-brand-primary/60"
                       required
-                    />
+                    >
+                      <option value="">Select Supplier</option>
+                      {filterOptions.suppliers && filterOptions.suppliers.map((s) => {
+                        const name = typeof s === "object" ? (s.name || s.supplier_name) : s;
+                        const code = typeof s === "object" ? (s.code || s.supplier_code) : "";
+                        return (
+                          <option key={name} value={name}>
+                            {name} {code ? `(${code})` : ""}
+                          </option>
+                        );
+                      })}
+                    </select>
                   </div>
+
                   <div>
                     <label className="block text-[15px] font-bold uppercase tracking-wider text-brand-subtext mb-1">
-                      Secret Code <span className="text-brand-danger">*</span>
+                      Supplier Code
                     </label>
                     <input
                       type="text"
-                      value={editForm.secret_code}
-                      onChange={(e) => setEditForm(prev => ({ ...prev, secret_code: e.target.value }))}
-                      className="h-11 w-full rounded-xl border border-brand-border bg-white px-3.5 text-[16px] font-medium outline-none focus:border-brand-primary/60 font-bold"
-                      required
+                      value={editForm.supplier_code || editForm.secret_code || ""}
+                      readOnly
+                      className="h-11 w-full rounded-xl border border-slate-200 bg-slate-100 px-3.5 text-[16px] font-mono font-bold text-slate-800 outline-none cursor-not-allowed select-none"
                     />
                   </div>
                 </div>
@@ -630,30 +717,6 @@ function Inventory() {
                       required
                     />
                   </div>
-                </div>
-
-                <div>
-                  <div className="flex items-center justify-between mb-1">
-                    <label className="block text-[15px] font-bold uppercase tracking-wider text-brand-subtext">Supplier Name <span className="text-brand-danger">*</span></label>
-                    <button
-                      type="button"
-                      onClick={() => handleAddNewClick("suppliers")}
-                      className="text-[14px] font-bold text-brand-accent hover:text-blue-600 transition-colors uppercase"
-                    >
-                      + Add Supplier
-                    </button>
-                  </div>
-                  <select
-                    value={editForm.supplier_name}
-                    onChange={(e) => setEditForm(prev => ({ ...prev, supplier_name: e.target.value }))}
-                    className="h-11 w-full rounded-xl border border-brand-border bg-white px-3.5 text-[16px] font-medium outline-none focus:border-brand-primary/60"
-                    required
-                  >
-                    <option value="">Select Supplier</option>
-                    {filterOptions.suppliers && filterOptions.suppliers.map((s) => (
-                      <option key={s} value={s}>{s}</option>
-                    ))}
-                  </select>
                 </div>
 
                 <div className="flex items-center justify-end gap-2 border-t border-brand-border pt-4">

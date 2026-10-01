@@ -44,6 +44,13 @@ router.post("/master/:category", productController.addMasterItem);
 router.put("/master/:category/:id", productController.editMasterItem);
 router.delete("/master/:category/:id", productController.deleteMasterItem);
 
+// Explicit Supplier routes
+router.get("/suppliers", productController.getSuppliers);
+router.get("/suppliers/:id", productController.getSupplierById);
+router.post("/suppliers", productController.createSupplier);
+router.put("/suppliers/:id", productController.updateSupplier);
+router.delete("/suppliers/:id", productController.deleteSupplier);
+
 // Activity logs route
 router.get("/activity-log", productController.getActivityLogs);
 

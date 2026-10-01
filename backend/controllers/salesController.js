@@ -1632,33 +1632,45 @@ exports.getCustomerPurchaseHistory = async (req, res) => {
 
 // GET /api/purchases
 exports.getPurchaseHistory = async (req, res) => {
-  const { supplier, brand, type, article_number, startDate, endDate } = req.query;
+  const { supplier, supplier_id, brand, type, supplier_code, supplierCode, startDate, endDate } = req.query;
+  const targetSupplierCode = supplier_code || supplierCode;
   try {
-    let sql = "SELECT * FROM purchase_history WHERE 1=1";
+    let sql = `
+      SELECT ph.*,
+             COALESCE(s.name, ph.supplier_name) AS supplier_name,
+             COALESCE(s.supplier_code, ph.supplier_code) AS supplier_code
+      FROM purchase_history ph
+      LEFT JOIN suppliers s ON ph.supplier_id = s.id
+      WHERE 1=1
+    `;
     const params = [];
 
-    if (supplier && supplier.trim() !== "") {
-      sql += " AND supplier_name = ? ";
-      params.push(supplier);
+    if (supplier_id && supplier_id.trim() !== "") {
+      sql += " AND (ph.supplier_id = ? OR s.id = ?) ";
+      params.push(supplier_id, supplier_id);
+    } else if (supplier && supplier.trim() !== "") {
+      sql += " AND (ph.supplier_name = ? OR s.name = ? OR ph.supplier_id = ?) ";
+      params.push(supplier.trim(), supplier.trim(), supplier.trim());
     }
     if (brand && brand.trim() !== "") {
-      sql += " AND brand = ? ";
+      sql += " AND ph.brand = ? ";
       params.push(brand);
     }
     if (type && type.trim() !== "") {
-      sql += " AND type = ? ";
+      sql += " AND ph.type = ? ";
       params.push(type);
     }
-    if (article_number && article_number.trim() !== "") {
-      sql += " AND article_number = ? ";
-      params.push(article_number);
+    if (targetSupplierCode && targetSupplierCode.trim() !== "") {
+      sql += " AND (LOWER(s.supplier_code) LIKE ? OR LOWER(ph.supplier_code) LIKE ?) ";
+      const codeParam = `%${targetSupplierCode.trim().toLowerCase()}%`;
+      params.push(codeParam, codeParam);
     }
     if (startDate && endDate) {
-      sql += " AND purchase_date BETWEEN ? AND ? ";
+      sql += " AND ph.purchase_date BETWEEN ? AND ? ";
       params.push(startDate + " 00:00:00", endDate + " 23:59:59");
     }
 
-    sql += " ORDER BY purchase_date DESC ";
+    sql += " ORDER BY ph.purchase_date DESC ";
 
     const records = await query(sql, params);
 
@@ -1683,35 +1695,43 @@ exports.getPurchaseHistory = async (req, res) => {
 };
 
 // Internal helper for purchase export data
-const retrievePurchaseReportData = async (supplier, brand, type, articleNumber, startDate, endDate) => {
+const retrievePurchaseReportData = async (supplier, brand, type, supplierCode, startDate, endDate) => {
   const shopNameRes = await query("SELECT setting_value FROM settings WHERE setting_key = 'shop_name'");
   const shopName = shopNameRes[0]?.setting_value || "My Slipper Shop";
 
-  let sql = "SELECT * FROM purchase_history WHERE 1=1";
+  let sql = `
+    SELECT ph.*,
+           COALESCE(s.name, ph.supplier_name) AS supplier_name,
+           COALESCE(s.supplier_code, ph.supplier_code) AS supplier_code
+    FROM purchase_history ph
+    LEFT JOIN suppliers s ON ph.supplier_id = s.id
+    WHERE 1=1
+  `;
   const params = [];
 
   if (supplier && supplier.trim() !== "") {
-    sql += " AND supplier_name = ? ";
-    params.push(supplier.trim());
+    sql += " AND (ph.supplier_name = ? OR s.name = ? OR ph.supplier_id = ?) ";
+    params.push(supplier.trim(), supplier.trim(), supplier.trim());
   }
   if (brand && brand.trim() !== "") {
-    sql += " AND brand = ? ";
+    sql += " AND ph.brand = ? ";
     params.push(brand.trim());
   }
   if (type && type.trim() !== "") {
-    sql += " AND type = ? ";
+    sql += " AND ph.type = ? ";
     params.push(type.trim());
   }
-  if (articleNumber && articleNumber.trim() !== "") {
-    sql += " AND article_number = ? ";
-    params.push(articleNumber.trim());
+  if (supplierCode && supplierCode.trim() !== "") {
+    sql += " AND (LOWER(s.supplier_code) LIKE ? OR LOWER(ph.supplier_code) LIKE ?) ";
+    const codeParam = `%${supplierCode.trim().toLowerCase()}%`;
+    params.push(codeParam, codeParam);
   }
   if (startDate && endDate) {
-    sql += " AND purchase_date BETWEEN ? AND ? ";
+    sql += " AND ph.purchase_date BETWEEN ? AND ? ";
     params.push(startDate + " 00:00:00", endDate + " 23:59:59");
   }
 
-  sql += " ORDER BY purchase_date DESC ";
+  sql += " ORDER BY ph.purchase_date DESC ";
 
   const records = await query(sql, params);
 
@@ -1734,7 +1754,7 @@ const retrievePurchaseReportData = async (supplier, brand, type, articleNumber, 
       supplier: supplier || "",
       brand: brand || "",
       type: type || "",
-      articleNumber: articleNumber || "",
+      supplierCode: supplierCode || "",
       startDate: startDate || "",
       endDate: endDate || ""
     }
@@ -1742,10 +1762,10 @@ const retrievePurchaseReportData = async (supplier, brand, type, articleNumber, 
 };
 
 exports.getPurchaseExportData = async (req, res) => {
-  const { supplier, brand, type, article_number, articleNumber, startDate, endDate } = req.query;
-  const articleVal = article_number || articleNumber;
+  const { supplier, brand, type, supplier_code, supplierCode, startDate, endDate } = req.query;
+  const codeVal = supplier_code || supplierCode;
   try {
-    const data = await retrievePurchaseReportData(supplier, brand, type, articleVal, startDate, endDate);
+    const data = await retrievePurchaseReportData(supplier, brand, type, codeVal, startDate, endDate);
     res.json(data);
   } catch (err) {
     console.error("getPurchaseExportData error:", err);
@@ -1754,12 +1774,12 @@ exports.getPurchaseExportData = async (req, res) => {
 };
 
 exports.getPurchaseExportExcel = async (req, res) => {
-  const { supplier, brand, type, article_number, articleNumber, startDate, endDate } = req.query;
-  const articleVal = article_number || articleNumber;
+  const { supplier, brand, type, supplier_code, supplierCode, startDate, endDate } = req.query;
+  const codeVal = supplier_code || supplierCode;
   const ExcelJS = require("exceljs");
 
   try {
-    const data = await retrievePurchaseReportData(supplier, brand, type, articleVal, startDate, endDate);
+    const data = await retrievePurchaseReportData(supplier, brand, type, codeVal, startDate, endDate);
 
     if (!data.records || data.records.length === 0) {
       return res.status(400).json({ error: "No records available for the selected filters." });
@@ -1787,7 +1807,7 @@ exports.getPurchaseExportExcel = async (req, res) => {
     if (supplier) activeFilters.push(`Supplier: "${supplier}"`);
     if (brand) activeFilters.push(`Brand: "${brand}"`);
     if (type) activeFilters.push(`Type: "${type}"`);
-    if (articleVal) activeFilters.push(`Article: "${articleVal}"`);
+    if (codeVal) activeFilters.push(`Supplier Code: "${codeVal}"`);
     const appliedFiltersStr = `Applied Filters: ${activeFilters.length > 0 ? activeFilters.join(", ") : "None"}`;
     worksheet.getCell("A5").value = appliedFiltersStr;
     worksheet.getCell("A5").font = { name: "Arial", size: 10, italic: true };
@@ -1828,6 +1848,7 @@ exports.getPurchaseExportExcel = async (req, res) => {
       { header: "Purchase Date", key: "purchase_date" },
       { header: "Reference No", key: "purchase_ref_no" },
       { header: "Supplier Name", key: "supplier_name" },
+      { header: "Supplier Code", key: "supplier_code" },
       { header: "Article No", key: "article_number" },
       { header: "Brand", key: "brand" },
       { header: "Product Type", key: "type" },
@@ -1860,23 +1881,25 @@ exports.getPurchaseExportExcel = async (req, res) => {
       row.getCell(1).value = dObj ? `${dObj.toLocaleDateString("en-IN")} ${dObj.toLocaleTimeString("en-IN", { hour: '2-digit', minute: '2-digit' })}` : "-";
       row.getCell(2).value = rec.purchase_ref_no || "-";
       row.getCell(3).value = rec.supplier_name || "-";
-      row.getCell(4).value = rec.article_number || "-";
-      row.getCell(5).value = rec.brand || "-";
-      row.getCell(6).value = rec.type || "-";
-      row.getCell(7).value = rec.size !== undefined && rec.size !== null ? String(rec.size) : "-";
-      row.getCell(8).value = rec.color || "-";
-      row.getCell(9).value = Number(rec.quantity || 0);
-      row.getCell(10).value = Number(rec.purchase_price || 0);
-      row.getCell(11).value = Number(rec.total_value || 0);
+      row.getCell(4).value = rec.supplier_code || "-";
+      row.getCell(5).value = rec.article_number || "-";
+      row.getCell(6).value = rec.brand || "-";
+      row.getCell(7).value = rec.type || "-";
+      row.getCell(8).value = rec.size !== undefined && rec.size !== null ? String(rec.size) : "-";
+      row.getCell(9).value = rec.color || "-";
+      row.getCell(10).value = Number(rec.quantity || 0);
+      row.getCell(11).value = Number(rec.purchase_price || 0);
+      row.getCell(12).value = Number(rec.total_value || 0);
 
-      row.getCell(9).numFmt = "#,##0";
-      row.getCell(10).numFmt = '"₹"#,##0.00';
+      row.getCell(10).numFmt = "#,##0";
       row.getCell(11).numFmt = '"₹"#,##0.00';
+      row.getCell(12).numFmt = '"₹"#,##0.00';
 
       row.getCell(1).alignment = { horizontal: "center" };
-      row.getCell(7).alignment = { horizontal: "center" };
+      row.getCell(4).alignment = { horizontal: "center" };
       row.getCell(8).alignment = { horizontal: "center" };
       row.getCell(9).alignment = { horizontal: "center" };
+      row.getCell(10).alignment = { horizontal: "center" };
 
       columns.forEach((col, idx) => {
         const cell = row.getCell(idx + 1);
@@ -1900,12 +1923,12 @@ exports.getPurchaseExportExcel = async (req, res) => {
       cell.font = { name: "Arial", size: 10, bold: true };
     });
 
-    totalRow.getCell(9).value = { formula: `SUM(I${startDataRow}:I${endDataRow})` };
-    totalRow.getCell(9).numFmt = "#,##0";
-    totalRow.getCell(9).alignment = { horizontal: "center" };
+    totalRow.getCell(10).value = { formula: `SUM(J${startDataRow}:J${endDataRow})` };
+    totalRow.getCell(10).numFmt = "#,##0";
+    totalRow.getCell(10).alignment = { horizontal: "center" };
 
-    totalRow.getCell(11).value = { formula: `SUM(K${startDataRow}:K${endDataRow})` };
-    totalRow.getCell(11).numFmt = '"₹"#,##0.00';
+    totalRow.getCell(12).value = { formula: `SUM(L${startDataRow}:L${endDataRow})` };
+    totalRow.getCell(12).numFmt = '"₹"#,##0.00';
     totalRow.height = 22;
 
     // Auto-fit column widths

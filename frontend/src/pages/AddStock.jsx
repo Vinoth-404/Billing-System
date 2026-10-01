@@ -1,11 +1,15 @@
 import { useState, useEffect } from "react";
 import axios from "axios";
-import { PackageOpen, Sparkles, RefreshCw, Trash2, ArrowRight, X, AlertTriangle } from "lucide-react";
+import { PackageOpen, Sparkles, RefreshCw, Trash2, X, AlertTriangle } from "lucide-react";
 const API = import.meta.env.VITE_API_URL;
+
 function AddStock() {
   const initialFormState = {
     serial_no: "",
     article_number: "",
+    supplier_id: "",
+    supplier_name: "",
+    supplier_code: "",
     secret_code: "",
     brand: "",
     type: "",
@@ -15,7 +19,6 @@ function AddStock() {
     selling_price: "",
     discount_percent: "0",
     stock: "",
-    supplier_name: "",
     purchase_ref_no: "",
   };
 
@@ -30,21 +33,23 @@ function AddStock() {
     brands: [],
     types: [],
     sizes: [],
-    colors: []
+    colors: [],
+    suppliers: []
   });
 
   // Inline Master Data Creation Modal State
   const [inlineModal, setInlineModal] = useState({
     isOpen: false,
-    category: "", // "brands", "types", "sizes", "colors"
+    category: "", // "brands", "types", "sizes", "colors", "suppliers"
     label: "",
     value: "",
+    code: "", // for supplier code
     error: "",
     submitting: false
   });
 
   // Fetch unique filter values from DISTINCT DB API
-  const fetchFilterOptions = (selectNewCategory = null, selectNewValue = null) => {
+  const fetchFilterOptions = (selectNewCategory = null, selectNewValue = null, extraData = null) => {
     axios
       .get(`${API}/api/products/filters`)
       .then((res) => {
@@ -52,10 +57,20 @@ function AddStock() {
           setFilterOptions(res.data);
           
           if (selectNewCategory && selectNewValue) {
-            setFormData(prev => ({
-              ...prev,
-              [selectNewCategory]: selectNewValue
-            }));
+            if (selectNewCategory === "supplier_name" && extraData) {
+              setFormData(prev => ({
+                ...prev,
+                supplier_name: selectNewValue,
+                supplier_id: extraData.id || prev.supplier_id,
+                supplier_code: extraData.supplier_code || extraData.code || prev.supplier_code,
+                secret_code: extraData.supplier_code || extraData.code || prev.secret_code
+              }));
+            } else {
+              setFormData(prev => ({
+                ...prev,
+                [selectNewCategory]: selectNewValue
+              }));
+            }
           }
         }
       })
@@ -74,15 +89,24 @@ function AddStock() {
           })
           .then((res) => {
             if (res.data) {
+              const matchedSupplierName = res.data.supplier_name || "";
+              const supObj = filterOptions.suppliers?.find(
+                (s) => (typeof s === "object" ? (s.name || s.supplier_name) : s) === matchedSupplierName || (typeof s === "object" && s.id === res.data.supplier_id)
+              );
+              const supCode = res.data.supplier_code || res.data.secret_code || (supObj ? (supObj.code || supObj.supplier_code) : "");
+              const supId = res.data.supplier_id || (supObj ? supObj.id : "");
+
               setFormData((prev) => ({
                 ...prev,
                 serial_no: res.data.serial_no,
                 purchase_price: res.data.purchase_price,
                 selling_price: res.data.selling_price,
                 discount_percent: res.data.discount_percent || "0",
-                supplier_name: res.data.supplier_name || "",
+                supplier_id: supId,
+                supplier_name: matchedSupplierName || (supObj ? (supObj.name || supObj.supplier_name) : prev.supplier_name),
+                supplier_code: supCode || prev.supplier_code,
+                secret_code: supCode || prev.secret_code,
                 article_number: res.data.article_number || prev.article_number || "",
-                secret_code: res.data.secret_code || prev.secret_code || "",
                 stock: ""
               }));
               setIsExisting(true);
@@ -131,6 +155,44 @@ function AddStock() {
     setFormData((prev) => ({ ...prev, [name]: value }));
   };
 
+  const handleSupplierChange = (e) => {
+    const selectedName = e.target.value;
+    if (!selectedName) {
+      setFormData((prev) => ({
+        ...prev,
+        supplier_name: "",
+        supplier_id: "",
+        supplier_code: "",
+        secret_code: ""
+      }));
+      return;
+    }
+
+    const supplierObj = filterOptions.suppliers?.find(
+      (s) => (typeof s === "object" ? (s.name || s.supplier_name) : s) === selectedName
+    );
+
+    if (supplierObj && typeof supplierObj === "object") {
+      const code = supplierObj.code || supplierObj.supplier_code || "";
+      const id = supplierObj.id || "";
+      setFormData((prev) => ({
+        ...prev,
+        supplier_name: selectedName,
+        supplier_id: id,
+        supplier_code: code,
+        secret_code: code
+      }));
+    } else {
+      setFormData((prev) => ({
+        ...prev,
+        supplier_name: selectedName,
+        supplier_id: "",
+        supplier_code: "",
+        secret_code: ""
+      }));
+    }
+  };
+
   const handleClear = () => {
     setFormData(initialFormState);
     setIsExisting(false);
@@ -140,15 +202,17 @@ function AddStock() {
   const handleSubmit = (e) => {
     e.preventDefault();
     
-    // Verify payload contains article_number and secret_code before sending
     const payload = {
       ...formData,
-      article_number: formData.article_number ? formData.article_number.trim() : "",
-      secret_code: formData.secret_code ? formData.secret_code.trim() : ""
+      article_number: formData.article_number ? formData.article_number.trim().toUpperCase() : "",
+      supplier_id: formData.supplier_id || null,
+      supplier_name: formData.supplier_name ? formData.supplier_name.trim() : "",
+      supplier_code: formData.supplier_code ? formData.supplier_code.trim() : "",
+      secret_code: formData.supplier_code ? formData.supplier_code.trim() : (formData.secret_code ? formData.secret_code.trim() : "")
     };
 
     // Validations
-    if (!payload.article_number || !payload.secret_code || !payload.brand || !payload.type || !payload.size || !payload.color || !payload.purchase_price || !payload.selling_price || !payload.stock || !payload.supplier_name) {
+    if (!payload.article_number || !payload.supplier_name || !payload.brand || !payload.type || !payload.size || !payload.color || !payload.purchase_price || !payload.selling_price || !payload.stock) {
       setAlert({ type: "danger", message: "Please fill in all required fields." });
       return;
     }
@@ -205,6 +269,7 @@ function AddStock() {
       category,
       label,
       value: "",
+      code: "",
       error: "",
       submitting: false
     });
@@ -214,14 +279,27 @@ function AddStock() {
   const handleInlineSubmit = (e) => {
     e.preventDefault();
     if (!inlineModal.value.trim()) {
-      setInlineModal(prev => ({ ...prev, error: "Value cannot be empty" }));
+      setInlineModal(prev => ({ ...prev, error: "Name cannot be empty" }));
+      return;
+    }
+
+    if (inlineModal.category === "suppliers" && !inlineModal.code.trim()) {
+      setInlineModal(prev => ({ ...prev, error: "Supplier Code is required (can be any custom alphanumeric code)." }));
       return;
     }
 
     setInlineModal(prev => ({ ...prev, submitting: true, error: "" }));
 
+    const postData = {
+      name: inlineModal.value.trim()
+    };
+
+    if (inlineModal.category === "suppliers") {
+      postData.supplier_code = inlineModal.code.trim().toUpperCase();
+    }
+
     axios
-      .post(`${API}/api/master/${inlineModal.category}`, { name: inlineModal.value.trim() })
+      .post(`${API}/api/master/${inlineModal.category}`, postData)
       .then((res) => {
         window.dispatchEvent(new Event("stock-updated"));
         
@@ -231,13 +309,14 @@ function AddStock() {
         if (inlineModal.category === "colors") fieldName = "color";
         if (inlineModal.category === "suppliers") fieldName = "supplier_name";
 
-        fetchFilterOptions(fieldName, res.data.name);
+        fetchFilterOptions(fieldName, res.data.name, res.data);
 
         setInlineModal({
           isOpen: false,
           category: "",
           label: "",
           value: "",
+          code: "",
           error: "",
           submitting: false
         });
@@ -274,7 +353,7 @@ function AddStock() {
             </div>
           )}
 
-          {/* Article Number & Secret Code Row */}
+          {/* Article Number & Purchase Reference Row */}
           <div className="grid gap-5 md:grid-cols-2">
             <div>
               <label className="block text-[15px] font-bold uppercase tracking-wider text-brand-subtext mb-2">
@@ -293,17 +372,73 @@ function AddStock() {
 
             <div>
               <label className="block text-[15px] font-bold uppercase tracking-wider text-brand-subtext mb-2">
-                Secret Code <span className="text-brand-danger">*</span>
+                Purchase Reference Number
               </label>
               <input
                 type="text"
-                name="secret_code"
-                value={formData.secret_code}
+                name="purchase_ref_no"
+                value={formData.purchase_ref_no}
                 onChange={handleInputChange}
-                placeholder="e.g. IKP"
-                className="h-12 w-full rounded-xl border border-brand-border bg-white px-4 text-[16px] placeholder:text-[15px] font-medium outline-none focus:border-brand-primary/60 focus:ring-2 focus:ring-brand-primary/10 font-bold"
-                required
+                placeholder="Auto-generated if left blank"
+                className="h-12 w-full rounded-xl border border-brand-border bg-white px-4 text-[16px] placeholder:text-[15px] font-bold outline-none focus:border-brand-primary/60 focus:ring-2 focus:ring-brand-primary/10 uppercase"
               />
+            </div>
+          </div>
+
+          {/* Supplier Selection Row (Dropdown + Auto-populated Read-Only Code) */}
+          <div className="grid gap-5 md:grid-cols-2">
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <label className="block text-[15px] font-bold uppercase tracking-wider text-brand-subtext">
+                  Supplier Name <span className="text-brand-danger">*</span>
+                </label>
+                <button
+                  type="button"
+                  onClick={() => handleAddNewClick("suppliers")}
+                  className="text-[14px] font-bold text-brand-accent hover:text-blue-600 transition-colors uppercase tracking-wider"
+                >
+                  + Add New Supplier
+                </button>
+              </div>
+              <select
+                name="supplier_name"
+                value={formData.supplier_name}
+                onChange={handleSupplierChange}
+                className="h-12 w-full rounded-xl border border-brand-border bg-white px-4 text-[16px] font-medium outline-none focus:border-brand-primary/60 focus:ring-2 focus:ring-brand-primary/10"
+                required
+              >
+                <option value="">Select Supplier</option>
+                {filterOptions.suppliers && filterOptions.suppliers.map((s) => {
+                  const name = typeof s === "object" ? (s.name || s.supplier_name) : s;
+                  const code = typeof s === "object" ? (s.code || s.supplier_code) : "";
+                  return (
+                    <option key={name} value={name}>
+                      {name} {code ? `(${code})` : ""}
+                    </option>
+                  );
+                })}
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-[15px] font-bold uppercase tracking-wider text-brand-subtext mb-2">
+                Supplier Code
+              </label>
+              <div className="relative">
+                <input
+                  type="text"
+                  name="supplier_code"
+                  value={formData.supplier_code || ""}
+                  readOnly
+                  placeholder="Auto-populated from database"
+                  className="h-12 w-full rounded-xl border border-slate-200 bg-slate-100 px-4 text-[16px] font-mono font-bold text-slate-800 outline-none cursor-not-allowed select-none"
+                />
+                {formData.supplier_code && (
+                  <span className="absolute right-3 top-1/2 -translate-y-1/2 rounded-md bg-emerald-100 px-2.5 py-1 text-[12px] font-bold uppercase tracking-wider text-emerald-800">
+                    Linked
+                  </span>
+                )}
+              </div>
             </div>
           </div>
 
@@ -468,7 +603,7 @@ function AddStock() {
             </div>
           </div>
 
-          {/* Inventory & Logistics Row */}
+          {/* Inventory Quantity Row */}
           <div className="grid gap-5 md:grid-cols-2">
             <div>
               <label className="block text-[15px] font-bold uppercase tracking-wider text-brand-subtext mb-2">
@@ -482,50 +617,6 @@ function AddStock() {
                 placeholder={isExisting ? "e.g. 15 (adds to catalog)" : "Initial stock"}
                 className="h-12 w-full rounded-xl border border-brand-border bg-white px-4 text-[16px] placeholder:text-[15px] font-medium outline-none focus:border-brand-primary/60 focus:ring-2 focus:ring-brand-primary/10"
                 required
-              />
-            </div>
-
-            <div>
-              <div className="flex items-center justify-between mb-2">
-                <label className="block text-[15px] font-bold uppercase tracking-wider text-brand-subtext">
-                  Supplier Name <span className="text-brand-danger">*</span>
-                </label>
-                <button
-                  type="button"
-                  onClick={() => handleAddNewClick("suppliers")}
-                  className="text-[14px] font-bold text-brand-accent hover:text-blue-600 transition-colors uppercase tracking-wider"
-                >
-                  + Add New Supplier
-                </button>
-              </div>
-              <select
-                name="supplier_name"
-                value={formData.supplier_name}
-                onChange={handleInputChange}
-                className="h-12 w-full rounded-xl border border-brand-border bg-white px-4 text-[16px] font-medium outline-none focus:border-brand-primary/60 focus:ring-2 focus:ring-brand-primary/10"
-                required
-              >
-                <option value="">Select Supplier</option>
-                {filterOptions.suppliers && filterOptions.suppliers.map((s) => (
-                  <option key={s} value={s}>{s}</option>
-                ))}
-              </select>
-            </div>
-          </div>
-
-          {/* Purchase Details Row */}
-          <div className="grid gap-5 md:grid-cols-2">
-            <div>
-              <label className="block text-[15px] font-bold uppercase tracking-wider text-brand-subtext mb-2">
-                Purchase Reference Number
-              </label>
-              <input
-                type="text"
-                name="purchase_ref_no"
-                value={formData.purchase_ref_no}
-                onChange={handleInputChange}
-                placeholder="Auto-generated if left blank"
-                className="h-12 w-full rounded-xl border border-brand-border bg-white px-4 text-[16px] placeholder:text-[15px] font-bold outline-none focus:border-brand-primary/60 focus:ring-2 focus:ring-brand-primary/10 uppercase"
               />
             </div>
           </div>
@@ -546,7 +637,7 @@ function AddStock() {
                     <X className="h-5 w-5" />
                   </button>
                 </div>
-                <div className="p-6 space-y-4">
+                <form onSubmit={handleInlineSubmit} className="p-6 space-y-4">
                   {inlineModal.error && (
                     <div className="rounded-xl p-3 text-[14px] font-bold border bg-red-50 text-brand-danger border-red-200 flex items-start gap-2">
                       <AlertTriangle className="h-4 w-4 shrink-0 text-brand-danger" />
@@ -561,12 +652,32 @@ function AddStock() {
                       type="text"
                       value={inlineModal.value}
                       onChange={(e) => setInlineModal(prev => ({ ...prev, value: e.target.value }))}
-                      placeholder={`Enter new ${inlineModal.label.toLowerCase()}...`}
+                      placeholder={`Enter new ${inlineModal.label.toLowerCase()} name...`}
                       className="h-12 w-full rounded-xl border border-brand-border bg-white px-4 text-[16px] placeholder:text-[15px] font-medium outline-none focus:border-brand-primary/60 focus:ring-2 focus:ring-brand-primary/10"
                       required
                       autoFocus
                     />
                   </div>
+
+                  {inlineModal.category === "suppliers" && (
+                    <div>
+                      <label className="block text-[15px] font-bold uppercase tracking-wider text-brand-subtext mb-2">
+                        Supplier Code <span className="text-brand-danger">*</span>
+                      </label>
+                      <input
+                        type="text"
+                        value={inlineModal.code}
+                        onChange={(e) => setInlineModal(prev => ({ ...prev, code: e.target.value }))}
+                        placeholder="e.g. BIN01, IKP, BAT123, ABC-2026"
+                        className="h-12 w-full rounded-xl border border-brand-border bg-white px-4 text-[16px] placeholder:text-[15px] font-bold uppercase outline-none focus:border-brand-primary/60 focus:ring-2 focus:ring-brand-primary/10"
+                        required
+                      />
+                      <p className="text-[13px] text-brand-subtext mt-1">
+                        Any custom alphanumeric code (must be unique).
+                      </p>
+                    </div>
+                  )}
+
                   <div className="flex items-center justify-end gap-2 border-t border-brand-border pt-4">
                     <button
                       type="button"
@@ -576,8 +687,7 @@ function AddStock() {
                       Cancel
                     </button>
                     <button
-                      type="button"
-                      onClick={handleInlineSubmit}
+                      type="submit"
                       disabled={inlineModal.submitting}
                       className="flex items-center gap-1.5 px-6 py-2.5 rounded-xl bg-brand-accent text-[15px] font-bold text-white shadow-md shadow-brand-accent/20 hover:bg-blue-600 transition-all disabled:opacity-55"
                     >
@@ -585,7 +695,7 @@ function AddStock() {
                       Save
                     </button>
                   </div>
-                </div>
+                </form>
               </div>
             </div>
           )}
