@@ -1,4 +1,4 @@
-const db = require("../config/db");
+const db = require("../config/sqlite-db");
 const { sendSMS } = require("../services/smsService");
 const bcrypt = require("bcryptjs");
 const { syncProductNotifications } = require("../services/notificationService");
@@ -66,7 +66,7 @@ exports.getProductFilters = async (req, res) => {
     const [brands, types, sizes, colors, suppliers] = await Promise.all([
       query("SELECT name FROM brands ORDER BY name"),
       query("SELECT name FROM product_types ORDER BY name"),
-      query("SELECT name FROM sizes ORDER BY CAST(name AS UNSIGNED), name"),
+      query("SELECT name FROM sizes ORDER BY CAST(name AS INTEGER), name"),
       query("SELECT name FROM colors ORDER BY name"),
       query("SELECT id, name, name AS supplier_name, supplier_code, supplier_code AS code FROM suppliers ORDER BY name")
     ]);
@@ -225,7 +225,7 @@ exports.addOrUpdateStock = async (req, res) => {
       const purchaseRefNo = purchase_ref_no ? purchase_ref_no.trim() : `PO-${new Date().getFullYear()}-${Math.floor(1000 + Math.random() * 9000)}`;
       await query(
         `INSERT INTO purchase_history (product_id, supplier_id, supplier_code, purchase_date, purchase_ref_no, supplier_name, article_number, secret_code, brand, type, size, color, quantity, purchase_price, total_value)
-         VALUES (?, ?, ?, NOW(), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         VALUES (?, ?, ?, CURRENT_TIMESTAMP, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           existingProduct.id,
           finalSupplierId,
@@ -296,7 +296,7 @@ exports.addOrUpdateStock = async (req, res) => {
 
       // Auto-generate a new unique SKU/Serial Number using an optimized SQL query.
       const maxRow = await query(`
-        SELECT MAX(CAST(SUBSTRING(serial_no, LOCATE('-', serial_no) + 1) AS UNSIGNED)) AS maxNum 
+        SELECT MAX(CAST(substr(serial_no, instr(serial_no, '-') + 1) AS INTEGER)) AS maxNum 
         FROM products 
         WHERE serial_no LIKE 'SKU-%' OR serial_no LIKE 'SLIP-%'
       `);
@@ -333,7 +333,7 @@ exports.addOrUpdateStock = async (req, res) => {
       // Automatically generate a unique barcode using BC-[newId] padded
       const generatedBarcode = `BC-${String(newId).padStart(6, '0')}`;
       await query(
-        "UPDATE products SET barcode = ?, barcode_generated_at = NOW() WHERE id = ?",
+        "UPDATE products SET barcode = ?, barcode_generated_at = CURRENT_TIMESTAMP WHERE id = ?",
         [generatedBarcode, newId]
       );
 
@@ -341,7 +341,7 @@ exports.addOrUpdateStock = async (req, res) => {
       const purchaseRefNo = purchase_ref_no ? purchase_ref_no.trim() : `PO-${new Date().getFullYear()}-${Math.floor(1000 + Math.random() * 9000)}`;
       await query(
         `INSERT INTO purchase_history (product_id, supplier_id, supplier_code, purchase_date, purchase_ref_no, supplier_name, article_number, secret_code, brand, type, size, color, quantity, purchase_price, total_value)
-         VALUES (?, ?, ?, NOW(), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         VALUES (?, ?, ?, CURRENT_TIMESTAMP, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           newId,
           finalSupplierId,
@@ -433,7 +433,7 @@ exports.getProductByArticleNumber = async (req, res) => {
     if (!product.barcode) {
       const generatedBarcode = `BC-${String(product.id).padStart(6, '0')}`;
       await query(
-        "UPDATE products SET barcode = ?, barcode_generated_at = NOW() WHERE id = ?",
+        "UPDATE products SET barcode = ?, barcode_generated_at = CURRENT_TIMESTAMP WHERE id = ?",
         [generatedBarcode, product.id]
       );
       product.barcode = generatedBarcode;
@@ -589,7 +589,7 @@ exports.getMasterItems = async (req, res) => {
     }
     let orderClause = "ORDER BY name";
     if (category === "sizes") {
-      orderClause = "ORDER BY CAST(name AS UNSIGNED), name";
+      orderClause = "ORDER BY CAST(name AS INTEGER), name";
     }
     const results = await query(`SELECT * FROM ${table} ${orderClause}`);
     res.json(results);
@@ -897,7 +897,7 @@ exports.saveSettings = async (req, res) => {
       const value = settings[key] === null || settings[key] === undefined ? "" : String(settings[key]);
       console.log(`[Settings] Saving key="${key}" value_length=${value.length}`);
       await query(
-        "INSERT INTO settings (setting_key, setting_value) VALUES (?, ?) ON DUPLICATE KEY UPDATE setting_value = ?",
+        "INSERT INTO settings (setting_key, setting_value) VALUES (?, ?) ON CONFLICT(setting_key) DO UPDATE SET setting_value = excluded.setting_value",
         [key, value, value]
       );
     }
@@ -983,7 +983,7 @@ exports.changePassword = async (req, res) => {
 
     const hashedNewPassword = await bcrypt.hash(newPassword, 10);
     await query(
-      "INSERT INTO settings (setting_key, setting_value) VALUES ('admin_password', ?) ON DUPLICATE KEY UPDATE setting_value = ?",
+      "INSERT INTO settings (setting_key, setting_value) VALUES ('admin_password', ?) ON CONFLICT(setting_key) DO UPDATE SET setting_value = excluded.setting_value",
       [hashedNewPassword, hashedNewPassword]
     );
 
@@ -1041,7 +1041,7 @@ exports.resetPassword = async (req, res) => {
   try {
     const defaultHashed = await bcrypt.hash("admin123", 10);
     await query(
-      "INSERT INTO settings (setting_key, setting_value) VALUES ('admin_password', ?) ON DUPLICATE KEY UPDATE setting_value = ?",
+      "INSERT INTO settings (setting_key, setting_value) VALUES ('admin_password', ?) ON CONFLICT(setting_key) DO UPDATE SET setting_value = excluded.setting_value",
       [defaultHashed, defaultHashed]
     );
     console.log("[Auth Log] Success: Password reset to admin123 successfully.");
@@ -1098,7 +1098,7 @@ exports.setRecoveryPin = async (req, res) => {
 
     // 3. Save to database
     await query(
-      "INSERT INTO settings (setting_key, setting_value) VALUES ('recovery_pin', ?) ON DUPLICATE KEY UPDATE setting_value = ?",
+      "INSERT INTO settings (setting_key, setting_value) VALUES ('recovery_pin', ?) ON CONFLICT(setting_key) DO UPDATE SET setting_value = excluded.setting_value",
       [hashedPin, hashedPin]
     );
 
@@ -1117,8 +1117,8 @@ exports.verifyRecoveryPin = async (req, res) => {
 
   // Check 10-minute lockout state first
   if (pinLockoutUntil) {
-    if (Date.now() < pinLockoutUntil) {
-      const remainingSec = Math.ceil((pinLockoutUntil - Date.now()) / 1000);
+    if (Date.CURRENT_TIMESTAMP < pinLockoutUntil) {
+      const remainingSec = Math.ceil((pinLockoutUntil - Date.CURRENT_TIMESTAMP) / 1000);
       const remainingMin = Math.ceil(remainingSec / 60);
       return res.status(429).json({
         error: `Recovery PIN verification is temporarily locked for 10 minutes. Please try again in ${remainingMin} minute(s).`
@@ -1154,7 +1154,7 @@ exports.verifyRecoveryPin = async (req, res) => {
     if (!match) {
       failedPinAttempts += 1;
       if (failedPinAttempts >= 5) {
-        pinLockoutUntil = Date.now() + 10 * 60 * 1000; // 10 minutes from now
+        pinLockoutUntil = Date.CURRENT_TIMESTAMP + 10 * 60 * 1000; // 10 minutes from now
         return res.status(429).json({
           error: "Maximum incorrect Recovery PIN attempts reached. Recovery PIN verification is temporarily locked for 10 minutes."
         });
@@ -1171,7 +1171,7 @@ exports.verifyRecoveryPin = async (req, res) => {
 
     // Generate single-use resetToken (valid for 15 minutes)
     const resetToken = require("crypto").randomBytes(16).toString("hex");
-    resetTokens.set(resetToken, Date.now() + 15 * 60 * 1000);
+    resetTokens.set(resetToken, Date.CURRENT_TIMESTAMP + 15 * 60 * 1000);
 
     console.log("[Auth Log] Success: Recovery PIN verified successfully.");
     res.json({ success: true, message: "Recovery PIN verified successfully", resetToken });
@@ -1191,7 +1191,7 @@ exports.resetPasswordWithPin = async (req, res) => {
   }
 
   const expiry = resetTokens.get(resetToken);
-  if (Date.now() > expiry) {
+  if (Date.CURRENT_TIMESTAMP > expiry) {
     resetTokens.delete(resetToken);
     return res.status(400).json({ error: "Password reset session has expired. Please verify Recovery PIN again." });
   }
@@ -1211,7 +1211,7 @@ exports.resetPasswordWithPin = async (req, res) => {
   try {
     const hashedNewPassword = await bcrypt.hash(newPassword, 10);
     await query(
-      "INSERT INTO settings (setting_key, setting_value) VALUES ('admin_password', ?) ON DUPLICATE KEY UPDATE setting_value = ?",
+      "INSERT INTO settings (setting_key, setting_value) VALUES ('admin_password', ?) ON CONFLICT(setting_key) DO UPDATE SET setting_value = excluded.setting_value",
       [hashedNewPassword, hashedNewPassword]
     );
 
@@ -1341,9 +1341,9 @@ exports.regenerateBarcode = async (req, res) => {
       return res.status(404).json({ error: "Product not found." });
     }
     // Generate a barcode using ID and timestamp to guarantee absolute uniqueness
-    const newBarcode = `BC-${id}-${Date.now().toString().slice(-4)}`;
+    const newBarcode = `BC-${id}-${Date.CURRENT_TIMESTAMP.toString().slice(-4)}`;
     await query(
-      "UPDATE products SET barcode = ?, barcode_generated_at = NOW() WHERE id = ?",
+      "UPDATE products SET barcode = ?, barcode_generated_at = CURRENT_TIMESTAMP WHERE id = ?",
       [newBarcode, id]
     );
     res.json({ message: "Barcode regenerated successfully", barcode: newBarcode });
@@ -1454,9 +1454,9 @@ exports.generateMissingBarcodes = async (req, res) => {
     const products = await query("SELECT id FROM products WHERE barcode IS NULL OR barcode = ''");
     let count = 0;
     for (const prod of products) {
-      const barcode = `BC-${prod.id}-${Date.now().toString().slice(-4)}`;
+      const barcode = `BC-${prod.id}-${Date.CURRENT_TIMESTAMP.toString().slice(-4)}`;
       await query(
-        "UPDATE products SET barcode = ?, barcode_generated_at = NOW() WHERE id = ?",
+        "UPDATE products SET barcode = ?, barcode_generated_at = CURRENT_TIMESTAMP WHERE id = ?",
         [barcode, prod.id]
       );
       count++;
@@ -1521,7 +1521,7 @@ exports.setBackupLocation = async (req, res) => {
     }
 
     // Verify write permissions by writing a small test file check
-    const testFile = path.join(normalizedPath, `.write_test_${Date.now()}.tmp`);
+    const testFile = path.join(normalizedPath, `.write_test_${Date.CURRENT_TIMESTAMP}.tmp`);
     try {
       fs.writeFileSync(testFile, "test");
       fs.unlinkSync(testFile);
@@ -1531,12 +1531,12 @@ exports.setBackupLocation = async (req, res) => {
 
     // Save to settings table
     await query(
-      "INSERT INTO settings (setting_key, setting_value) VALUES ('backup_location', ?) ON DUPLICATE KEY UPDATE setting_value = ?",
+      "INSERT INTO settings (setting_key, setting_value) VALUES ('backup_location', ?) ON CONFLICT(setting_key) DO UPDATE SET setting_value = excluded.setting_value",
       [normalizedPath, normalizedPath]
     );
 
     await query(
-      "INSERT INTO settings (setting_key, setting_value) VALUES ('last_backup_status', 'Configured') ON DUPLICATE KEY UPDATE setting_value = 'Configured'"
+      "INSERT INTO settings (setting_key, setting_value) VALUES ('last_backup_status', 'Configured') ON CONFLICT(setting_key) DO UPDATE SET setting_value = excluded.setting_value"
     );
 
     console.log(`[Backup] Location set to: ${normalizedPath}`);
@@ -1582,14 +1582,14 @@ exports.createBackup = async (req, res) => {
 
     const formattedTime = getFormattedDateTime();
     await query(
-      "INSERT INTO settings (setting_key, setting_value) VALUES ('last_backup_time', ?) ON DUPLICATE KEY UPDATE setting_value = ?",
+      "INSERT INTO settings (setting_key, setting_value) VALUES ('last_backup_time', ?) ON CONFLICT(setting_key) DO UPDATE SET setting_value = excluded.setting_value",
       [formattedTime, formattedTime]
     );
     await query(
-      "INSERT INTO settings (setting_key, setting_value) VALUES ('last_backup_status', 'Success') ON DUPLICATE KEY UPDATE setting_value = 'Success'"
+      "INSERT INTO settings (setting_key, setting_value) VALUES ('last_backup_status', 'Success') ON CONFLICT(setting_key) DO UPDATE SET setting_value = excluded.setting_value"
     );
     await query(
-      "INSERT INTO settings (setting_key, setting_value) VALUES ('last_backup_file', ?) ON DUPLICATE KEY UPDATE setting_value = ?",
+      "INSERT INTO settings (setting_key, setting_value) VALUES ('last_backup_file', ?) ON CONFLICT(setting_key) DO UPDATE SET setting_value = excluded.setting_value",
       [filename, filename]
     );
 
@@ -1603,7 +1603,7 @@ exports.createBackup = async (req, res) => {
   } catch (err) {
     console.error("[Backup] Error creating backup:", err.message);
     await query(
-      "INSERT INTO settings (setting_key, setting_value) VALUES ('last_backup_status', 'Failed') ON DUPLICATE KEY UPDATE setting_value = 'Failed'"
+      "INSERT INTO settings (setting_key, setting_value) VALUES ('last_backup_status', 'Failed') ON CONFLICT(setting_key) DO UPDATE SET setting_value = excluded.setting_value"
     ).catch(() => {});
     res.status(500).json({ error: `Backup failed: ${err.message}` });
   }
@@ -1642,7 +1642,7 @@ exports.restoreBackup = async (req, res) => {
     // 3. Update restore status in DB settings
     const formattedTime = getFormattedDateTime();
     await query(
-      "INSERT INTO settings (setting_key, setting_value) VALUES ('last_backup_status', ?) ON DUPLICATE KEY UPDATE setting_value = ?",
+      "INSERT INTO settings (setting_key, setting_value) VALUES ('last_backup_status', ?) ON CONFLICT(setting_key) DO UPDATE SET setting_value = excluded.setting_value",
       [`Restored on ${formattedTime}`, `Restored on ${formattedTime}`]
     );
 

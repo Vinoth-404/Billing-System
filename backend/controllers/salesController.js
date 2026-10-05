@@ -1,4 +1,4 @@
-const db = require("../config/db");
+const db = require("../config/sqlite-db");
 const { sendSMS } = require("../services/smsService");
 const { syncProductNotifications } = require("../services/notificationService");
 
@@ -45,14 +45,14 @@ exports.recordSale = async (req, res) => {
   }
   // ────────────────────────────────────────────────────────────────────────────
 
-  const conn = await db.getConnection();
+  const conn = db;
 
   try {
-    await conn.beginTransaction();
+    
 
     // 1. Insert Sale record
     const date = new Date();
-    const [saleResult] = await conn.query(
+    const [saleResult] = await db.query(
       "INSERT INTO sales (bill_no, date, discount, gst, total_price, total_profit, payment_method, customer_name, customer_phone) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
       [
         bill_no,
@@ -71,8 +71,8 @@ exports.recordSale = async (req, res) => {
     // 2. Loop items to save item details and reduce inventory stock
     for (const item of items) {
       // Double check product stock availability with row lock
-      const [prod] = await conn.query(
-        "SELECT stock, purchase_price, selling_price, brand, type, size, color, article_number FROM products WHERE id = ? FOR UPDATE",
+      const [prod] = await db.query(
+        "SELECT stock, purchase_price, selling_price, brand, type, size, color, article_number FROM products WHERE id = ?",
         [item.product_id]
       );
       if (prod.length === 0) {
@@ -87,7 +87,7 @@ exports.recordSale = async (req, res) => {
       const articleNumber = item.article_number || prod[0].article_number;
 
       // Insert into sale_items
-      await conn.query(
+      await db.query(
         "INSERT INTO sale_items (sale_id, product_id, article_number, brand, type, size, color, quantity, purchase_price, selling_price, profit) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         [
           saleId,
@@ -107,19 +107,19 @@ exports.recordSale = async (req, res) => {
       const newStock = currentStock - item.quantity;
 
       // Decrement stock
-      await conn.query(
+      await db.query(
         "UPDATE products SET stock = ? WHERE id = ?",
         [newStock, item.product_id]
       );
 
       // Log to activity_log
-      await conn.query(
+      await db.query(
         "INSERT INTO activity_log (type, message) VALUES ('sale', ?)",
         [`Sold ${item.quantity} ${item.brand} ${item.type}s`]
       );
     }
 
-    await conn.commit();
+    
 
     // Respond to POS client IMMEDIATELY post-commit for fast response
     res.status(201).json({ message: "Sale recorded successfully", saleId, bill_no });
@@ -142,10 +142,10 @@ exports.recordSale = async (req, res) => {
     })();
 
   } catch (error) {
-    await conn.rollback();
+    
     res.status(500).json({ error: error.message || "Sale recording failed" });
   } finally {
-    conn.release();
+    
   }
 };
 
@@ -156,13 +156,13 @@ exports.getSalesItemsHistory = async (req, res) => {
   const params = [];
 
   if (filter === "today") {
-    dateCondition = "WHERE DATE(s.date) = CURDATE()";
+    dateCondition = "WHERE DATE(s.date) = DATE('now')";
   } else if (filter === "yesterday") {
-    dateCondition = "WHERE DATE(s.date) = DATE_SUB(CURDATE(), INTERVAL 1 DAY)";
+    dateCondition = "WHERE DATE(s.date) = DATE('now', '-1 day')";
   } else if (filter === "week") {
-    dateCondition = "WHERE s.date >= DATE_SUB(NOW(), INTERVAL 7 DAY)";
+    dateCondition = "WHERE s.date >= DATETIME('now', '-7 days')";
   } else if (filter === "month") {
-    dateCondition = "WHERE s.date >= DATE_SUB(NOW(), INTERVAL 30 DAY)";
+    dateCondition = "WHERE s.date >= DATETIME('now', '-30 days')";
   } else if (filter === "custom" && startDate && endDate) {
     dateCondition = "WHERE s.date BETWEEN ? AND ?";
     params.push(`${startDate} 00:00:00`, `${endDate} 23:59:59`);
@@ -199,7 +199,7 @@ exports.getSalesItemsHistory = async (req, res) => {
         s.customer_name,
         s.customer_phone,
         s.total_price AS total_amount,
-        GROUP_CONCAT(DISTINCT si.article_number SEPARATOR ', ') AS article_numbers
+        GROUP_CONCAT(DISTINCT si.article_number) AS article_numbers
       FROM sales s
       LEFT JOIN sale_items si ON s.id = si.sale_id
       ${whereClause}
@@ -247,20 +247,20 @@ exports.getDashboardStats = async (req, res) => {
         SELECT COALESCE(SUM(si.quantity), 0) AS count 
         FROM sale_items si 
         JOIN sales s ON si.sale_id = s.id 
-        WHERE DATE(s.date) = CURDATE()
+        WHERE DATE(s.date) = DATE('now')
       `),
       query(`
         SELECT COALESCE(SUM(si.quantity), 0) AS count 
         FROM sale_items si 
         JOIN sales s ON si.sale_id = s.id 
-        WHERE MONTH(s.date) = MONTH(CURDATE()) AND YEAR(s.date) = YEAR(CURDATE())
+        WHERE strftime('%Y-%m', s.date) = strftime('%Y-%m', 'now')
       `),
       query(`
         SELECT p.serial_no, p.brand, p.type, SUM(si.quantity) AS qty_sold
         FROM sale_items si
         JOIN sales s ON si.sale_id = s.id
         JOIN products p ON si.product_id = p.id
-        WHERE DATE(s.date) = CURDATE()
+        WHERE DATE(s.date) = DATE('now')
         GROUP BY p.id
         ORDER BY qty_sold DESC
       `),
@@ -269,7 +269,7 @@ exports.getDashboardStats = async (req, res) => {
         FROM sale_items si
         JOIN sales s ON si.sale_id = s.id
         JOIN products p ON si.product_id = p.id
-        WHERE MONTH(s.date) = MONTH(CURDATE()) AND YEAR(s.date) = YEAR(CURDATE())
+        WHERE strftime('%Y-%m', s.date) = strftime('%Y-%m', 'now')
         GROUP BY p.brand, p.type
         ORDER BY qty_sold DESC
       `),
@@ -486,13 +486,13 @@ exports.getReportsData = async (req, res) => {
   let intervalCondition = "";
   
   if (type === "daily") {
-    intervalCondition = "WHERE s.date >= DATE_SUB(CURDATE(), INTERVAL 7 DAY)";
+    intervalCondition = "WHERE s.date >= DATETIME('now', '-7 days')";
   } else if (type === "weekly") {
-    intervalCondition = "WHERE s.date >= DATE_SUB(CURDATE(), INTERVAL 8 WEEK)";
+    intervalCondition = "WHERE s.date >= DATETIME('now', '-56 days')";
   } else if (type === "monthly") {
-    intervalCondition = "WHERE s.date >= DATE_SUB(CURDATE(), INTERVAL 12 MONTH)";
+    intervalCondition = "WHERE s.date >= DATETIME('now', '-12 months')";
   } else {
-    intervalCondition = "WHERE s.date >= DATE_SUB(CURDATE(), INTERVAL 30 DAY)";
+    intervalCondition = "WHERE s.date >= DATETIME('now', '-30 days')";
   }
 
   try {

@@ -1,4 +1,4 @@
-const db = require("../config/db");
+const db = require("../config/sqlite-db");
 const { sendSMS } = require("./smsService");
 
 // Helper to execute query with promise

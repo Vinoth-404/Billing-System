@@ -1,4 +1,4 @@
-const db = require("../config/db");
+const db = require("../config/sqlite-db");
 
 // Helper to execute query with promise
 const query = async (sql, params = []) => {

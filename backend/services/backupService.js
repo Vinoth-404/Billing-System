@@ -1,24 +1,25 @@
 const fs = require("fs");
 const path = require("path");
-const db = require("../config/db");
-const mysql = require("mysql2");
+const db = require("../config/sqlite-db");
 
 /**
  * Format Date as YYYY-MM-DD_HH-mm-ss
  */
 function getTimestampString(date = new Date()) {
   const pad = (n) => String(n).padStart(2, "0");
+
   const yyyy = date.getFullYear();
   const mm = pad(date.getMonth() + 1);
   const dd = pad(date.getDate());
   const hh = pad(date.getHours());
   const min = pad(date.getMinutes());
   const ss = pad(date.getSeconds());
+
   return `${yyyy}-${mm}-${dd}_${hh}-${min}-${ss}`;
 }
 
 /**
- * Format Date for UI display (e.g. 21 Sep 2026, 10:30:00 AM)
+ * Format Date for UI display
  */
 function getFormattedDateTime(date = new Date()) {
   return date.toLocaleString("en-IN", {
@@ -33,88 +34,169 @@ function getFormattedDateTime(date = new Date()) {
 }
 
 /**
- * Create a complete .sql dump of the database
+ * Escape a JavaScript value for SQLite SQL.
+ */
+function escapeSqlValue(value) {
+  if (value === null || value === undefined) {
+    return "NULL";
+  }
+
+  if (typeof value === "number") {
+    if (Number.isFinite(value)) {
+      return String(value);
+    }
+    return "NULL";
+  }
+
+  if (typeof value === "boolean") {
+    return value ? "1" : "0";
+  }
+
+  if (Buffer.isBuffer(value)) {
+    return `X'${value.toString("hex")}'`;
+  }
+
+  return `'${String(value)
+    .replace(/\\/g, "\\\\")
+    .replace(/'/g, "''")}'`;
+}
+
+/**
+ * Create a complete SQLite-compatible .sql dump.
  */
 async function generateDatabaseDump() {
-  const [tablesRes] = await db.query("SHOW TABLES");
-  const dbName = process.env.DB_NAME || "slipper_shop";
-  const tableNames = tablesRes.map((t) => Object.values(t)[0]);
+  const [tables] = await db.query(`
+    SELECT name
+    FROM sqlite_master
+    WHERE type = 'table'
+      AND name NOT LIKE 'sqlite_%'
+    ORDER BY name
+  `);
 
   let sqlDump = `-- ========================================================\n`;
-  sqlDump += `-- Slipper Shop Management System - Database Backup\n`;
-  sqlDump += `-- Database: ${dbName}\n`;
+  sqlDump += `-- Slipper Shop Management System - SQLite Database Backup\n`;
+  sqlDump += `-- Database: SQLite\n`;
   sqlDump += `-- Date & Time: ${getFormattedDateTime()}\n`;
   sqlDump += `-- ========================================================\n\n`;
-  sqlDump += `SET FOREIGN_KEY_CHECKS = 0;\n`;
-  sqlDump += `SET SQL_MODE = 'NO_AUTO_VALUE_ON_ZERO';\n\n`;
 
-  for (const tableName of tableNames) {
-    // 1. Structure
-    const [createTableRes] = await db.query(`SHOW CREATE TABLE \`${tableName}\``);
-    const createTableSql = createTableRes[0]["Create Table"];
+  sqlDump += `PRAGMA foreign_keys = OFF;\n`;
+  sqlDump += `BEGIN TRANSACTION;\n\n`;
+
+  for (const table of tables) {
+    const tableName = table.name;
+
+    const [schemaRows] = await db.query(
+      `SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?`,
+      [tableName]
+    );
+
+    if (schemaRows.length === 0 || !schemaRows[0].sql) {
+      continue;
+    }
+
+    const createSql = schemaRows[0].sql;
 
     sqlDump += `-- --------------------------------------------------------\n`;
-    sqlDump += `-- Table structure for \`${tableName}\`\n`;
+    sqlDump += `-- Table structure for "${tableName}"\n`;
     sqlDump += `-- --------------------------------------------------------\n`;
-    sqlDump += `DROP TABLE IF EXISTS \`${tableName}\`;\n`;
-    sqlDump += `${createTableSql};\n\n`;
+    sqlDump += `DROP TABLE IF EXISTS "${tableName}";\n`;
+    sqlDump += `${createSql};\n\n`;
 
-    // 2. Data
-    const [rows] = await db.query(`SELECT * FROM \`${tableName}\``);
+    const [rows] = await db.query(
+      `SELECT * FROM "${tableName}"`
+    );
+
     if (rows.length > 0) {
-      sqlDump += `-- Data dumping for table \`${tableName}\`\n`;
-      const columns = Object.keys(rows[0]).map((col) => `\`${col}\``).join(", ");
+      sqlDump += `-- Data for "${tableName}"\n`;
+
+      const columns = Object.keys(rows[0])
+        .map((column) => `"${column.replace(/"/g, '""')}"`)
+        .join(", ");
 
       const batchSize = 100;
+
       for (let i = 0; i < rows.length; i += batchSize) {
         const batch = rows.slice(i, i + batchSize);
+
         const valuesList = batch
           .map((row) => {
-            const rowValues = Object.values(row).map((val) => mysql.escape(val));
-            return `(${rowValues.join(", ")})`;
-          })
-          .join(",\n  ");
+            const values = Object.values(row)
+              .map(escapeSqlValue)
+              .join(", ");
 
-        sqlDump += `INSERT INTO \`${tableName}\` (${columns}) VALUES\n  ${valuesList};\n`;
+            return `(${values})`;
+          })
+          .join(",\n");
+
+        sqlDump += `INSERT INTO "${tableName}" (${columns}) VALUES\n${valuesList};\n`;
       }
+
       sqlDump += `\n`;
     }
   }
 
-  sqlDump += `SET FOREIGN_KEY_CHECKS = 1;\n`;
+  sqlDump += `COMMIT;\n`;
+  sqlDump += `PRAGMA foreign_keys = ON;\n`;
+
   return sqlDump;
 }
 
 /**
- * Execute a SQL dump script against the database
+ * Restore a SQLite SQL dump.
  */
 async function restoreDatabaseFromSql(sqlContent) {
-  const connection = await db.getConnection();
+  if (!sqlContent || typeof sqlContent !== "string") {
+    throw new Error("Invalid SQL backup content.");
+  }
+
+  const statements = parseSqlStatements(sqlContent);
+
+  const { sqlite } = db;
+
+  sqlite.pragma("foreign_keys = OFF");
+
   try {
-    await connection.query("SET FOREIGN_KEY_CHECKS = 0");
+    const transaction = sqlite.transaction(() => {
+      for (const statement of statements) {
+        const trimmed = statement.trim();
 
-    const statements = parseSqlStatements(sqlContent);
+        if (!trimmed) {
+          continue;
+        }
 
-    for (const statement of statements) {
-      const trimmed = statement.trim();
-      if (trimmed.length > 0 && !trimmed.startsWith("--") && !trimmed.startsWith("/*")) {
-        await connection.query(trimmed);
+        const upper = trimmed.toUpperCase();
+
+        // Ignore transaction / MySQL compatibility commands
+        if (
+          upper === "BEGIN TRANSACTION" ||
+          upper === "BEGIN" ||
+          upper === "COMMIT" ||
+          upper === "ROLLBACK" ||
+          upper.startsWith("SET FOREIGN_KEY_CHECKS") ||
+          upper.startsWith("SET SQL_MODE")
+        ) {
+          continue;
+        }
+
+        sqlite.prepare(trimmed).run();
       }
-    }
+    });
 
-    await connection.query("SET FOREIGN_KEY_CHECKS = 1");
+    transaction();
   } finally {
-    connection.release();
+    sqlite.pragma("foreign_keys = ON");
   }
 }
 
 /**
- * Split SQL string into statements safely handling quotes and escaped quotes
+ * Split SQL into statements while respecting quoted strings.
  */
 function parseSqlStatements(sql) {
-  const cleanSql = sql.replace(/^--.*$/gm, "");
+  const cleanSql = sql.replace(/^\s*--.*$/gm, "");
+
   const statements = [];
   let currentStatement = "";
+
   let inString = false;
   let quoteChar = "";
   let isEscaped = false;
@@ -128,7 +210,7 @@ function parseSqlStatements(sql) {
       continue;
     }
 
-    if (char === "\\") {
+    if (char === "\\" && inString) {
       currentStatement += char;
       isEscaped = true;
       continue;
@@ -136,26 +218,42 @@ function parseSqlStatements(sql) {
 
     if (inString) {
       currentStatement += char;
+
       if (char === quoteChar) {
-        inString = false;
-      }
-    } else {
-      if (char === "'" || char === '"' || char === "`") {
-        inString = true;
-        quoteChar = char;
-        currentStatement += char;
-      } else if (char === ";") {
-        if (currentStatement.trim().length > 0) {
-          statements.push(currentStatement.trim());
+        // SQL uses doubled single quotes to escape apostrophes.
+        if (
+          quoteChar === "'" &&
+          cleanSql[i + 1] === "'"
+        ) {
+          currentStatement += cleanSql[++i];
+        } else {
+          inString = false;
         }
-        currentStatement = "";
-      } else {
-        currentStatement += char;
       }
+
+      continue;
     }
+
+    if (char === "'" || char === '"' || char === "`") {
+      inString = true;
+      quoteChar = char;
+      currentStatement += char;
+      continue;
+    }
+
+    if (char === ";") {
+      if (currentStatement.trim()) {
+        statements.push(currentStatement.trim());
+      }
+
+      currentStatement = "";
+      continue;
+    }
+
+    currentStatement += char;
   }
 
-  if (currentStatement.trim().length > 0) {
+  if (currentStatement.trim()) {
     statements.push(currentStatement.trim());
   }
 

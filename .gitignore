@@ -17,3 +17,18 @@
 
 # OS files
 .DS_Store
+# SQLite database files
+**/data/*.db
+**/data/*.db-*
+**/data/*.sql
+
+# Temporary verification / migration scripts
+backend/config/check-*.js
+backend/config/*-mysql-backup.js
+backend/config/migrate-to-sqlite.js
+backend/config/sqlite-db-backup.js
+backend/controllers/*-mysql-backup.js
+backend/services/*-mysql-backup.js
+backend/config/product-controller-copy.txt
+
+backend/config/verify-sqlite.js
