@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import axios from "axios";
-import { PackageOpen, Sparkles, RefreshCw, Trash2, X, AlertTriangle } from "lucide-react";
+import { PackageOpen, Sparkles, RefreshCw, Trash2 } from "lucide-react";
 const API = import.meta.env.VITE_API_URL;
 
 function AddStock() {
@@ -28,7 +28,7 @@ function AddStock() {
   const [alert, setAlert] = useState({ type: "", message: "" });
   const [submitting, setSubmitting] = useState(false);
 
-  // Dynamic dropdown lists loaded from DB
+  // Dynamic dropdown lists loaded from Master Data DB
   const [filterOptions, setFilterOptions] = useState({
     brands: [],
     types: [],
@@ -37,40 +37,13 @@ function AddStock() {
     suppliers: []
   });
 
-  // Inline Master Data Creation Modal State
-  const [inlineModal, setInlineModal] = useState({
-    isOpen: false,
-    category: "", // "brands", "types", "sizes", "colors", "suppliers"
-    label: "",
-    value: "",
-    code: "", // for supplier code
-    error: "",
-    submitting: false
-  });
-
-  // Fetch unique filter values from DISTINCT DB API
-  const fetchFilterOptions = (selectNewCategory = null, selectNewValue = null, extraData = null) => {
+  // Fetch unique filter values from Master Data DB API
+  const fetchFilterOptions = () => {
     axios
       .get(`${API}/api/products/filters`)
       .then((res) => {
         if (res.data) {
           setFilterOptions(res.data);
-          
-          if (selectNewCategory && selectNewValue) {
-            if (selectNewCategory === "supplier_name" && extraData) {
-              setFormData(prev => ({
-                ...prev,
-                supplier_name: selectNewValue,
-                supplier_id: extraData.id || prev.supplier_id,
-                supplier_code: extraData.supplier_code || extraData.code || prev.supplier_code
-              }));
-            } else {
-              setFormData(prev => ({
-                ...prev,
-                [selectNewCategory]: selectNewValue
-              }));
-            }
-          }
         }
       })
       .catch((err) => console.error("Error loading filter options:", err));
@@ -253,80 +226,6 @@ function AddStock() {
       });
   };
 
-  // Open inline modal for adding Brand/Type/Size/Color/Supplier
-  const handleAddNewClick = (category) => {
-    let label = "Brand";
-    if (category === "types") label = "Product Type";
-    if (category === "sizes") label = "Size";
-    if (category === "colors") label = "Color";
-    if (category === "suppliers") label = "Supplier";
-
-    setInlineModal({
-      isOpen: true,
-      category,
-      label,
-      value: "",
-      code: "",
-      error: "",
-      submitting: false
-    });
-  };
-
-  // Submit inline modal form
-  const handleInlineSubmit = (e) => {
-    e.preventDefault();
-    if (!inlineModal.value.trim()) {
-      setInlineModal(prev => ({ ...prev, error: "Name cannot be empty" }));
-      return;
-    }
-
-    if (inlineModal.category === "suppliers" && !inlineModal.code.trim()) {
-      setInlineModal(prev => ({ ...prev, error: "Supplier Code is required (can be any custom alphanumeric code)." }));
-      return;
-    }
-
-    setInlineModal(prev => ({ ...prev, submitting: true, error: "" }));
-
-    const postData = {
-      name: inlineModal.value.trim()
-    };
-
-    if (inlineModal.category === "suppliers") {
-      postData.supplier_code = inlineModal.code.trim().toUpperCase();
-    }
-
-    axios
-      .post(`${API}/api/master/${inlineModal.category}`, postData)
-      .then((res) => {
-        window.dispatchEvent(new Event("stock-updated"));
-        
-        let fieldName = "brand";
-        if (inlineModal.category === "types") fieldName = "type";
-        if (inlineModal.category === "sizes") fieldName = "size";
-        if (inlineModal.category === "colors") fieldName = "color";
-        if (inlineModal.category === "suppliers") fieldName = "supplier_name";
-
-        fetchFilterOptions(fieldName, res.data.name, res.data);
-
-        setInlineModal({
-          isOpen: false,
-          category: "",
-          label: "",
-          value: "",
-          code: "",
-          error: "",
-          submitting: false
-        });
-      })
-      .catch((err) => {
-        setInlineModal(prev => ({
-          ...prev,
-          submitting: false,
-          error: err.response?.data?.error || "Failed to add new item."
-        }));
-      });
-  };
-
   return (
     <div className="space-y-8 animate-slide-up">
       {/* Page Header */}
@@ -389,18 +288,9 @@ function AddStock() {
           {/* Row 2: Supplier Selection (Dropdown + Auto-populated Read-Only Code) */}
           <div className="grid gap-5 md:grid-cols-2">
             <div>
-              <div className="flex items-center justify-between mb-2">
-                <label className="block text-[15px] font-bold uppercase tracking-wider text-brand-subtext">
-                  Supplier Name <span className="text-brand-danger">*</span>
-                </label>
-                <button
-                  type="button"
-                  onClick={() => handleAddNewClick("suppliers")}
-                  className="text-[14px] font-bold text-brand-accent hover:text-blue-600 transition-colors uppercase tracking-wider"
-                >
-                  + Add New Supplier
-                </button>
-              </div>
+              <label className="block text-[15px] font-bold uppercase tracking-wider text-brand-subtext mb-2">
+                Supplier Name <span className="text-brand-danger">*</span>
+              </label>
               <select
                 name="supplier_name"
                 value={formData.supplier_name}
@@ -446,18 +336,9 @@ function AddStock() {
           {/* Row 3: Product Specifications */}
           <div className="grid gap-5 md:grid-cols-2">
             <div>
-              <div className="flex items-center justify-between mb-2">
-                <label className="block text-[15px] font-bold uppercase tracking-wider text-brand-subtext">
-                  Brand <span className="text-brand-danger">*</span>
-                </label>
-                <button
-                  type="button"
-                  onClick={() => handleAddNewClick("brands")}
-                  className="text-[14px] font-bold text-brand-accent hover:text-blue-600 transition-colors uppercase tracking-wider"
-                >
-                  + Add New Brand
-                </button>
-              </div>
+              <label className="block text-[15px] font-bold uppercase tracking-wider text-brand-subtext mb-2">
+                Brand <span className="text-brand-danger">*</span>
+              </label>
               <select
                 name="brand"
                 value={formData.brand}
@@ -473,18 +354,9 @@ function AddStock() {
             </div>
 
             <div>
-              <div className="flex items-center justify-between mb-2">
-                <label className="block text-[15px] font-bold uppercase tracking-wider text-brand-subtext">
-                  Product Type <span className="text-brand-danger">*</span>
-                </label>
-                <button
-                  type="button"
-                  onClick={() => handleAddNewClick("types")}
-                  className="text-[14px] font-bold text-brand-accent hover:text-blue-600 transition-colors uppercase tracking-wider"
-                >
-                  + Add New Type
-                </button>
-              </div>
+              <label className="block text-[15px] font-bold uppercase tracking-wider text-brand-subtext mb-2">
+                Product Type <span className="text-brand-danger">*</span>
+              </label>
               <select
                 name="type"
                 value={formData.type}
@@ -503,18 +375,9 @@ function AddStock() {
           {/* Row 4: Variant Specifications */}
           <div className="grid gap-5 md:grid-cols-2">
             <div>
-              <div className="flex items-center justify-between mb-2">
-                <label className="block text-[15px] font-bold uppercase tracking-wider text-brand-subtext">
-                  Size (UK/US) <span className="text-brand-danger">*</span>
-                </label>
-                <button
-                  type="button"
-                  onClick={() => handleAddNewClick("sizes")}
-                  className="text-[14px] font-bold text-brand-accent hover:text-blue-600 transition-colors uppercase tracking-wider"
-                >
-                  + Add New Size
-                </button>
-              </div>
+              <label className="block text-[15px] font-bold uppercase tracking-wider text-brand-subtext mb-2">
+                Size (UK/US) <span className="text-brand-danger">*</span>
+              </label>
               <select
                 name="size"
                 value={formData.size}
@@ -530,18 +393,9 @@ function AddStock() {
             </div>
 
             <div>
-              <div className="flex items-center justify-between mb-2">
-                <label className="block text-[15px] font-bold uppercase tracking-wider text-brand-subtext">
-                  Color <span className="text-brand-danger">*</span>
-                </label>
-                <button
-                  type="button"
-                  onClick={() => handleAddNewClick("colors")}
-                  className="text-[14px] font-bold text-brand-accent hover:text-blue-600 transition-colors uppercase tracking-wider"
-                >
-                  + Add New Color
-                </button>
-              </div>
+              <label className="block text-[15px] font-bold uppercase tracking-wider text-brand-subtext mb-2">
+                Color <span className="text-brand-danger">*</span>
+              </label>
               <select
                 name="color"
                 value={formData.color}
@@ -635,85 +489,6 @@ function AddStock() {
               />
             </div>
           </div>
-
-          {/* Inline Modal Component inside Form */}
-          {inlineModal.isOpen && (
-            <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4 backdrop-blur-xs">
-              <div className="w-full max-w-sm bg-white rounded-2xl border border-brand-border shadow-premium overflow-hidden animate-slide-up">
-                <div className="flex items-center justify-between border-b border-brand-border px-6 py-4 bg-slate-50/50">
-                  <h3 className="text-[20px] font-bold text-brand-text uppercase tracking-wider">
-                    Create New {inlineModal.label}
-                  </h3>
-                  <button 
-                    type="button"
-                    onClick={() => setInlineModal(prev => ({ ...prev, isOpen: false }))}
-                    className="text-brand-subtext hover:text-brand-text transition-colors"
-                  >
-                    <X className="h-5 w-5" />
-                  </button>
-                </div>
-                <form onSubmit={handleInlineSubmit} className="p-6 space-y-4">
-                  {inlineModal.error && (
-                    <div className="rounded-xl p-3 text-[14px] font-bold border bg-red-50 text-brand-danger border-red-200 flex items-start gap-2">
-                      <AlertTriangle className="h-4 w-4 shrink-0 text-brand-danger" />
-                      <div>{inlineModal.error}</div>
-                    </div>
-                  )}
-                  <div>
-                    <label className="block text-[15px] font-bold uppercase tracking-wider text-brand-subtext mb-2">
-                      {inlineModal.label} Name <span className="text-brand-danger">*</span>
-                    </label>
-                    <input
-                      type="text"
-                      value={inlineModal.value}
-                      onChange={(e) => setInlineModal(prev => ({ ...prev, value: e.target.value }))}
-                      placeholder={`Enter new ${inlineModal.label.toLowerCase()} name...`}
-                      className="h-12 w-full rounded-xl border border-brand-border bg-white px-4 text-[16px] placeholder:text-[15px] font-medium outline-none focus:border-brand-primary/60 focus:ring-2 focus:ring-brand-primary/10"
-                      required
-                      autoFocus
-                    />
-                  </div>
-
-                  {inlineModal.category === "suppliers" && (
-                    <div>
-                      <label className="block text-[15px] font-bold uppercase tracking-wider text-brand-subtext mb-2">
-                        Supplier Code <span className="text-brand-danger">*</span>
-                      </label>
-                      <input
-                        type="text"
-                        value={inlineModal.code}
-                        onChange={(e) => setInlineModal(prev => ({ ...prev, code: e.target.value }))}
-                        placeholder="e.g. BIN01, IKP, BAT123, ABC-2026"
-                        className="h-12 w-full rounded-xl border border-brand-border bg-white px-4 text-[16px] placeholder:text-[15px] font-bold uppercase outline-none focus:border-brand-primary/60 focus:ring-2 focus:ring-brand-primary/10"
-                        required
-                      />
-                      <p className="text-[13px] text-brand-subtext mt-1">
-                        Any custom alphanumeric code (must be unique).
-                      </p>
-                    </div>
-                  )}
-
-                  <div className="flex items-center justify-end gap-2 border-t border-brand-border pt-4">
-                    <button
-                      type="button"
-                      onClick={() => setInlineModal(prev => ({ ...prev, isOpen: false }))}
-                      className="px-5 py-2.5 rounded-xl border border-brand-border bg-white text-[15px] font-bold text-brand-subtext hover:bg-slate-50 transition-colors"
-                    >
-                      Cancel
-                    </button>
-                    <button
-                      type="submit"
-                      disabled={inlineModal.submitting}
-                      className="flex items-center gap-1.5 px-6 py-2.5 rounded-xl bg-brand-accent text-[15px] font-bold text-white shadow-md shadow-brand-accent/20 hover:bg-blue-600 transition-all disabled:opacity-55"
-                    >
-                      {inlineModal.submitting && <RefreshCw className="h-4 w-4 animate-spin" />}
-                      Save
-                    </button>
-                  </div>
-                </form>
-              </div>
-            </div>
-          )}
 
           {/* Actions Row */}
           <div className="flex items-center justify-end gap-4 border-t border-brand-border pt-6">
